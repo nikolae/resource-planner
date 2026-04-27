@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Resource Planner</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Resource Planner</h1>
+    <div class="header-actions">
+      <button id="btn-add-task" class="btn btn-primary">+ Task</button>
+      <button id="btn-add-resource" class="btn btn-secondary">+ Resource</button>
+      <button id="btn-seed" class="btn btn-ghost">Load Demo Data</button>
+      <div class="zoom-controls">
+        <button id="btn-zoom-out" class="btn btn-ghost btn-icon" title="Zoom out">−</button>
+        <span id="zoom-label">Day</span>
+        <button id="btn-zoom-in" class="btn btn-ghost btn-icon" title="Zoom in">+</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="gantt-wrapper">
+      <div class="gantt-sidebar" id="gantt-sidebar">
+        <div class="sidebar-header">
+          <span class="col-name">Task</span>
+          <span class="col-resource">Resource</span>
+          <span class="col-dates">Start</span>
+          <span class="col-dates">End</span>
+        </div>
+        <div class="sidebar-body" id="sidebar-body"></div>
+      </div>
+      <div class="gantt-chart-area" id="gantt-chart-area">
+        <div class="chart-header" id="chart-header"></div>
+        <div class="chart-body" id="chart-body">
+          <canvas id="gantt-canvas"></canvas>
+          <svg id="dep-svg"></svg>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Task modal -->
+  <div class="modal-overlay" id="task-modal">
+    <div class="modal">
+      <h2 id="task-modal-title">New Task</h2>
+      <form id="task-form">
+        <input type="hidden" id="task-id">
+        <label>Name <input type="text" id="task-name" required></label>
+        <label>Description <textarea id="task-desc" rows="2"></textarea></label>
+        <div class="form-row">
+          <label>Start <input type="date" id="task-start" required></label>
+          <label>End <input type="date" id="task-end" required></label>
+        </div>
+        <div class="form-row">
+          <label>Resource
+            <select id="task-resource"><option value="">— none —</option></select>
+          </label>
+          <label>Progress (%)
+            <input type="number" id="task-progress" min="0" max="100" value="0">
+          </label>
+        </div>
+        <label>Color <input type="color" id="task-color" value="#4a86c8"></label>
+        <div class="form-row">
+          <label>Parent task
+            <select id="task-parent"><option value="">— none —</option></select>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="btn-task-cancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="btn-task-delete" style="display:none">Delete</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Resource modal -->
+  <div class="modal-overlay" id="resource-modal">
+    <div class="modal">
+      <h2 id="resource-modal-title">New Resource</h2>
+      <form id="resource-form">
+        <input type="hidden" id="res-id">
+        <label>Name <input type="text" id="res-name" required></label>
+        <label>Role <input type="text" id="res-role"></label>
+        <label>Color <input type="color" id="res-color" value="#4a86c8"></label>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="btn-res-cancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="btn-res-delete" style="display:none">Delete</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Dependency modal -->
+  <div class="modal-overlay" id="dep-modal">
+    <div class="modal">
+      <h2>Add Dependency</h2>
+      <form id="dep-form">
+        <label>Predecessor
+          <select id="dep-pred" required></select>
+        </label>
+        <label>Successor
+          <select id="dep-succ" required></select>
+        </label>
+        <label>Type
+          <select id="dep-type">
+            <option value="FS">Finish → Start</option>
+            <option value="SS">Start → Start</option>
+            <option value="FF">Finish → Finish</option>
+            <option value="SF">Start → Finish</option>
+          </select>
+        </label>
+        <label>Lag (days) <input type="number" id="dep-lag" value="0"></label>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="btn-dep-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">Add</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Context menu for dependency -->
+  <div class="context-menu" id="ctx-menu" style="display:none">
+    <button id="ctx-add-dep">Link dependency…</button>
+    <button id="ctx-edit-task">Edit task</button>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
