@@ -86,6 +86,8 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Configurable lag (days) on each dependency
 - Create dependencies by **dragging between task bar connectors**, via right-click context menu, or via the dependency modal
 - Duplicate and self-referencing dependencies are rejected
+- **Click any dependency arrow** to highlight it (turns red); click to delete with confirmation
+- **Schedule enforcement** — when a dependency is created, the successor task automatically shifts forward to satisfy the constraint while preserving its duration
 - Dependencies are filtered with the project view
 
 ### Color Picker
@@ -93,6 +95,27 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Recently used colors (up to 8) are shown below the presets, persisted in browser localStorage
 - Click any swatch to select it; the active color is highlighted with a white border
 - The native color picker is still available for custom colors
+
+### Export PNG
+- Click "Export PNG" in the header to download the current Gantt view as a PNG image
+- Composites sidebar (columns, header, rows), date header, task bars, dependency arrows, and overlays into a single image
+- Chart is clipped to the last task bar plus a small margin — no wasted empty space on the right
+- Works in both Tasks and Resources views, and respects sidebar collapsed/expanded state
+- Useful for embedding in Confluence pages, slide decks, or sharing via email
+
+### Themes
+- Three built-in themes:
+  - **Midnight** — deep navy blue (default, original theme)
+  - **Dark** — neutral dark gray, VS Code-inspired
+  - **Light** — clean white/light gray for bright environments
+- **Theme manager** (palette icon in header) — browse all themes, see color previews, apply with one click
+- **Create custom themes** — name your theme and pick colors for all 8 CSS variables (background, surface, surface2, border, text, text dim, accent, danger)
+- **Edit and delete** custom themes; built-in themes can be duplicated as a starting point
+- Live color preview bar in the editor shows all 8 colors as you adjust them
+- Light/dark mode is auto-detected from the background color brightness, so custom themes with light backgrounds automatically get light-mode UI adjustments
+- All UI elements adapt: sidebar, modals, chart grid, dependency arrows, today marker, connectors, overload highlights, scrollbars
+- Canvas-drawn elements (bar labels, resize handles, connector circles) also adapt to the current theme
+- Theme choice and custom themes are persisted to localStorage
 
 ### UI State Persistence
 - All UI preferences are saved to browser localStorage and restored on page load:
@@ -102,15 +125,17 @@ A Python/Flask web application for multi-project resource planning with an inter
   - Selected project filter
   - Sidebar collapsed state
   - Sidebar width
+  - Theme
 
 ### Settings
 - Gear icon in the header opens a settings modal
 - Editable parameters: application name, host, port, debug mode, database URI
 - The application name controls the header title and browser tab title, and takes effect immediately
+- **Load Demo Data** button is available in the settings modal to populate sample projects
 - Settings are persisted to `config.json`; host, port, and database URI changes require a server restart
 
 ### Demo Data
-- Click "Load Demo Data" in the header to populate two sample projects with resources, tasks, dependencies, and realistic allocation percentages
+- Click "Load Demo Data" in the settings modal to populate two sample projects with resources, tasks, dependencies, and realistic allocation percentages
 - Includes examples of partial allocations (PM at 10%, engineer at 80%) and overloaded resources
 
 ## Quick Start

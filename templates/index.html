@@ -26,7 +26,9 @@
       </div>
       <button id="btn-add-task" class="btn btn-primary">+ Task</button>
       <button id="btn-manage-resources" class="btn btn-secondary">Resources</button>
-      <button id="btn-seed" class="btn btn-ghost">Load Demo Data</button>
+      <button id="btn-export-png" class="btn btn-secondary">Export PNG</button>
+      <button id="btn-themes" class="btn btn-ghost btn-icon" title="Themes">&#127912;</button>
+      <button id="btn-help" class="btn btn-ghost btn-icon" title="Help">?</button>
       <button id="btn-settings" class="btn btn-ghost btn-icon" title="Settings">&#9881;</button>
       <div class="zoom-controls" title="Horizontal zoom">
         <button id="btn-zoom-out" class="btn btn-ghost btn-icon" title="Zoom out">&minus;</button>
@@ -46,9 +48,9 @@
       <div class="gantt-sidebar" id="gantt-sidebar">
         <div class="sidebar-header" id="sidebar-header">
           <span class="col-name" data-col="0">Task<span class="col-resize-handle"></span></span>
-          <span class="col-resource" data-col="1">Resource<span class="col-resize-handle"></span></span>
-          <span class="col-dates" data-col="2">Start<span class="col-resize-handle"></span></span>
-          <span class="col-dates" data-col="3">End</span>
+          <span class="col-dates" data-col="1">Start<span class="col-resize-handle"></span></span>
+          <span class="col-dates" data-col="2">End<span class="col-resize-handle"></span></span>
+          <span class="col-resource" data-col="3">Resource</span>
         </div>
         <div class="sidebar-body" id="sidebar-body"></div>
       </div>
@@ -208,10 +210,108 @@
         <label>Database URI <input type="text" id="cfg-db-uri"></label>
         <p class="settings-note">Changes to host, port, and database URI take effect after restarting the server.</p>
         <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="btn-seed">Load Demo Data</button>
           <button type="button" class="btn btn-ghost" id="btn-settings-cancel">Cancel</button>
           <button type="submit" class="btn btn-primary">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Theme manager modal -->
+  <div class="modal-overlay" id="theme-list-modal">
+    <div class="modal modal-wide">
+      <div class="modal-header-row">
+        <h2>Themes</h2>
+        <button type="button" class="btn btn-primary" id="btn-add-theme">+ New Theme</button>
+      </div>
+      <div id="theme-list-body"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="btn-theme-list-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Theme edit modal -->
+  <div class="modal-overlay" id="theme-edit-modal">
+    <div class="modal">
+      <h2 id="theme-edit-title">New Theme</h2>
+      <form id="theme-edit-form">
+        <input type="hidden" id="theme-edit-key">
+        <label>Name <input type="text" id="theme-edit-name" required></label>
+        <div class="form-row">
+          <label>Background <input type="color" id="theme-bg" value="#1a1a2e"></label>
+          <label>Surface <input type="color" id="theme-surface" value="#16213e"></label>
+        </div>
+        <div class="form-row">
+          <label>Surface 2 <input type="color" id="theme-surface2" value="#0f3460"></label>
+          <label>Border <input type="color" id="theme-border" value="#1a4080"></label>
+        </div>
+        <div class="form-row">
+          <label>Text <input type="color" id="theme-text" value="#e0e0e0"></label>
+          <label>Text Dim <input type="color" id="theme-text-dim" value="#8899aa"></label>
+        </div>
+        <div class="form-row">
+          <label>Accent <input type="color" id="theme-accent" value="#4a86c8"></label>
+          <label>Danger <input type="color" id="theme-danger" value="#e74c3c"></label>
+        </div>
+        <div id="theme-preview-bar" style="margin-top:12px;border-radius:6px;height:32px;display:flex;overflow:hidden"></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="btn-theme-edit-cancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="btn-theme-delete" style="display:none">Delete</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Help modal -->
+  <div class="modal-overlay" id="help-modal">
+    <div class="modal modal-wide" style="max-height:85vh">
+      <h2>Getting Started</h2>
+      <div class="help-content">
+        <div class="help-section">
+          <h3>Projects</h3>
+          <p>Use the <strong>dropdown</strong> in the top-left to switch projects or view all at once. Click <strong>+</strong> to create a new project, or the <strong>hamburger icon</strong> to manage and batch-delete projects.</p>
+        </div>
+        <div class="help-section">
+          <h3>Tasks</h3>
+          <p>Click <strong>+ Task</strong> to create one. Assign resources, set dates, pick a color, and group under a parent task. Click a task in the <strong>sidebar</strong> or <strong>double-click its bar</strong> on the chart to edit. Right-click a bar for a context menu.</p>
+        </div>
+        <div class="help-section">
+          <h3>Gantt Chart</h3>
+          <p><strong>Drag</strong> a bar to move it. <strong>Drag the edges</strong> to resize (cursor changes to indicate). The chart auto-expands when you drag past the visible range.</p>
+          <p>Use the <strong>horizontal zoom</strong> (Day / 3-Day / Week / 2-Week / Month) and <strong>vertical zoom</strong> (XS&ndash;XL) controls to adjust the view.</p>
+        </div>
+        <div class="help-section">
+          <h3>Dependencies</h3>
+          <p><strong>Hover</strong> a task bar to see connector circles at each end. <strong>Drag from a connector</strong> to another task to link them. The dependency type (FS, SS, FF, SF) is determined by which ends you connect.</p>
+          <p><strong>Hover a dependency arrow</strong> to highlight it red, then <strong>click to delete</strong>. When a dependency is created, the successor automatically shifts to satisfy the constraint.</p>
+        </div>
+        <div class="help-section">
+          <h3>Resources</h3>
+          <p>Click <strong>Resources</strong> to manage the resource list. Assign multiple resources per task with <strong>allocation percentages</strong> (e.g., a PM at 10%, an engineer at 80%).</p>
+          <p>Switch to <strong>Resources view</strong> to see one row per resource with all their tasks. Red overlays flag periods where a resource exceeds 100% utilization.</p>
+        </div>
+        <div class="help-section">
+          <h3>Sidebar</h3>
+          <p>The sidebar is <strong>collapsible</strong> (arrow toggle) and <strong>resizable</strong> (drag the border). Column widths are also adjustable by dragging header borders. When collapsed, task bars show resource names inline.</p>
+        </div>
+        <div class="help-section">
+          <h3>Themes &amp; Export</h3>
+          <p>Click the <strong>palette icon</strong> to browse, create, edit, or duplicate themes with full color customization.</p>
+          <p>Click <strong>Export PNG</strong> to download the current view as an image for Confluence, slides, or email.</p>
+        </div>
+        <div class="help-section">
+          <h3>Keyboard Shortcuts</h3>
+          <table class="help-keys">
+            <tr><td><kbd>Esc</kbd></td><td>Close the current modal</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary" id="btn-help-close">Got it</button>
+      </div>
     </div>
   </div>
 

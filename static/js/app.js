@@ -36,6 +36,68 @@
     "#673ab7", "#ff5722", "#009688", "#cddc39", "#ffc107",
   ];
   const MAX_RECENTS = 8;
+
+  const BUILTIN_THEMES = {
+    midnight: {
+      name: "Midnight", builtin: true,
+      vars: { "--bg": "#1a1a2e", "--surface": "#16213e", "--surface2": "#0f3460",
+              "--border": "#1a4080", "--text": "#e0e0e0", "--text-dim": "#8899aa",
+              "--accent": "#4a86c8", "--danger": "#e74c3c" },
+    },
+    dark: {
+      name: "Dark", builtin: true,
+      vars: { "--bg": "#1e1e1e", "--surface": "#2d2d2d", "--surface2": "#383838",
+              "--border": "#505050", "--text": "#d4d4d4", "--text-dim": "#888888",
+              "--accent": "#569cd6", "--danger": "#f44747" },
+    },
+    light: {
+      name: "Light", builtin: true,
+      vars: { "--bg": "#f5f5f5", "--surface": "#ffffff", "--surface2": "#e8e8e8",
+              "--border": "#d0d0d0", "--text": "#1e1e1e", "--text-dim": "#666666",
+              "--accent": "#2563eb", "--danger": "#dc2626" },
+    },
+  };
+  const THEME_STORAGE_KEY = "rp_custom_themes";
+  let customThemes = loadCustomThemes();
+  let currentTheme = "midnight";
+
+  function loadCustomThemes() {
+    try { return JSON.parse(localStorage.getItem(THEME_STORAGE_KEY) || "{}"); }
+    catch { return {}; }
+  }
+  function saveCustomThemes() {
+    try { localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(customThemes)); } catch {}
+  }
+  function getAllThemes() {
+    const all = {};
+    for (const [k, v] of Object.entries(BUILTIN_THEMES)) all[k] = v;
+    for (const [k, v] of Object.entries(customThemes)) all[k] = v;
+    return all;
+  }
+  function getTheme(key) { return getAllThemes()[key]; }
+
+  function isLightTheme(vars) {
+    const bg = vars["--bg"] || "#000000";
+    const r = parseInt(bg.slice(1, 3), 16);
+    const g = parseInt(bg.slice(3, 5), 16);
+    const b = parseInt(bg.slice(5, 7), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 > 128;
+  }
+
+  let lightMode = false;
+
+  function applyTheme(name) {
+    const theme = getTheme(name);
+    if (!theme) return;
+    currentTheme = name;
+    lightMode = isLightTheme(theme.vars);
+    const root = document.documentElement;
+    for (const [k, v] of Object.entries(theme.vars)) root.style.setProperty(k, v);
+    document.body.classList.toggle("theme-light", lightMode);
+    if (tasks.length) render();
+    saveUIState();
+  }
+
   let zoomIdx = 0;
 
   let tasks = [];
@@ -311,9 +373,9 @@
           <span class="resource-dots">${dots || `<span class="task-dot" style="background:${t.color}"></span>`}</span>
           ${esc(t.name)}
         </span>
-        <span class="col-resource" title="${esc(names)}">${esc(names)}</span>
         <span class="col-dates">${fmtDate(t.start_date)}</span>
-        <span class="col-dates">${fmtDate(t.end_date)}</span>`;
+        <span class="col-dates">${fmtDate(t.end_date)}</span>
+        <span class="col-resource" title="${esc(names)}">${esc(names)}</span>`;
       row.addEventListener("click", () => openTaskModal(t));
       row.addEventListener("contextmenu", (e) => showCtxMenu(e, t));
       body.appendChild(row);
@@ -372,7 +434,7 @@
 
     // Ensure canvas is wide enough for all bars
     for (const t of tasks) {
-      const barEnd = dateToPx(t.end_date) + z.colW + 20;
+      const barEnd = dateToPx(t.end_date) + oneDayPx() + 20;
       if (barEnd > totalW) totalW = Math.ceil(barEnd);
     }
 
@@ -390,7 +452,7 @@
     for (let i = 0; i < tasks.length; i++) {
       const t = tasks[i];
       const x1 = dateToPx(t.start_date);
-      const x2 = dateToPx(t.end_date) + z.colW;
+      const x2 = dateToPx(t.end_date) + oneDayPx();
       const y = i * ROW_H + BAR_PAD;
       const w = Math.max(x2 - x1, 8);
 
@@ -422,7 +484,7 @@
         const cr = 5;
         const cy = y + BAR_H / 2;
         // Left connector (start)
-        ctx.fillStyle = "#ffffffdd";
+        ctx.fillStyle = lightMode ? "#333333dd" : "#ffffffdd";
         ctx.strokeStyle = t.color;
         ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(x1, cy, cr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -432,7 +494,7 @@
 
       // Highlight target bar during link drag
       if (linkDrag && linkDrag.targetIdx === i) {
-        ctx.strokeStyle = "#fffc";
+        ctx.strokeStyle = lightMode ? "#333c" : "#fffc";
         ctx.lineWidth = 2;
         ctx.beginPath(); roundRect(ctx, x1 - 1, y - 1, w + 2, BAR_H + 2, 5); ctx.stroke();
       }
@@ -450,7 +512,7 @@
     const totalH = resViewRows.length * ROW_H;
 
     for (const t of tasks) {
-      const barEnd = dateToPx(t.end_date) + z.colW + 20;
+      const barEnd = dateToPx(t.end_date) + oneDayPx() + 20;
       if (barEnd > totalW) totalW = Math.ceil(barEnd);
     }
 
@@ -470,7 +532,7 @@
       const rowY = ri * ROW_H;
       for (const t of rv.tasks) {
         const x1 = dateToPx(t.start_date);
-        const x2 = dateToPx(t.end_date) + z.colW;
+        const x2 = dateToPx(t.end_date) + oneDayPx();
         const w = Math.max(x2 - x1, 8);
         const y = rowY + BAR_PAD;
         drawBar(ctx, x1, y, w, t.color, t.progress, t.name);
@@ -489,15 +551,16 @@
       const rv = resViewRows[ri];
       for (const span of rv.overloaded) {
         const x1 = timeToPx(span.start);
-        const x2 = timeToPx(span.end) + z.colW;
+        const x2 = timeToPx(span.end) + oneDayPx();
         const y = ri * ROW_H;
         const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
         rect.setAttribute("x", x1);
         rect.setAttribute("y", y);
         rect.setAttribute("width", Math.max(x2 - x1, 4));
         rect.setAttribute("height", ROW_H);
-        rect.setAttribute("fill", "#e74c3c33");
-        rect.setAttribute("stroke", "#e74c3c88");
+        const danger = cssVar("--danger") || "#e74c3c";
+        rect.setAttribute("fill", danger + "33");
+        rect.setAttribute("stroke", danger + "88");
         rect.setAttribute("stroke-width", "1");
         rect.setAttribute("rx", "3");
         svg.appendChild(rect);
@@ -506,7 +569,7 @@
         const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
         txt.setAttribute("x", x1 + 4);
         txt.setAttribute("y", y + ROW_H - 4);
-        txt.setAttribute("fill", "#e74c3ccc");
+        txt.setAttribute("fill", danger + "cc");
         txt.setAttribute("font-size", "9");
         txt.setAttribute("font-family", "-apple-system, sans-serif");
         txt.textContent = span.util + "%";
@@ -517,8 +580,13 @@
 
   // ── Shared drawing helpers ────────────────────────────
 
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
   function drawGrid(ctx, totalW, totalH, z, rowCount) {
-    ctx.strokeStyle = "#1a406030";
+    const border = cssVar("--border") || "#1a4080";
+    ctx.strokeStyle = border + "30";
     ctx.lineWidth = 1;
     for (let i = 0; i <= timeCols; i++) {
       const x = i * z.colW;
@@ -534,9 +602,10 @@
   function drawToday(ctx, totalW, totalH, z) {
     const todayX = dateToPx(todayStr());
     if (todayX >= 0 && todayX <= totalW) {
-      ctx.fillStyle = "#e74c3c22";
-      ctx.fillRect(todayX, 0, z.colW, totalH);
-      ctx.strokeStyle = "#e74c3c88";
+      const danger = cssVar("--danger") || "#e74c3c";
+      ctx.fillStyle = danger + "22";
+      ctx.fillRect(todayX, 0, oneDayPx(), totalH);
+      ctx.strokeStyle = danger + "88";
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(todayX, 0); ctx.lineTo(todayX, totalH); ctx.stroke();
     }
@@ -552,7 +621,7 @@
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.beginPath(); roundRect(ctx, x, y, w, BAR_H, 4); ctx.stroke();
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = lightMode ? "#1e1e1e" : "#fff";
     const fontSize = Math.max(10, Math.min(BAR_H * 0.5, 16));
     ctx.font = `${fontSize}px -apple-system, sans-serif`;
     ctx.textBaseline = "middle";
@@ -567,7 +636,7 @@
 
   function drawResizeHandles(ctx, x1, y, w, edge) {
     const handleW = 4, handleH = BAR_H - 6, handleY = y + 3;
-    ctx.fillStyle = "#ffffffbb";
+    ctx.fillStyle = lightMode ? "#333333bb" : "#ffffffbb";
     if (edge === "start" || edge === "both") {
       ctx.beginPath(); roundRect(ctx, x1 + 2, handleY, handleW, handleH, 2); ctx.fill();
     }
@@ -594,9 +663,10 @@
     const taskIdx = {};
     tasks.forEach((t, i) => { taskIdx[t.id] = i; });
 
+    const arrowColor = lightMode ? "#33333388" : "#e0e0e088";
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
     defs.innerHTML = `<marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-      <path d="M0,0 L8,3 L0,6 z" fill="#e0e0e088"/></marker>
+      <path d="M0,0 L8,3 L0,6 z" fill="${arrowColor}"/></marker>
       <marker id="arrow-hover" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
       <path d="M0,0 L8,3 L0,6 z" fill="#ff6666"/></marker>`;
     svg.appendChild(defs);
@@ -618,7 +688,7 @@
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
       path.setAttribute("d", pathD);
       path.setAttribute("fill", "none");
-      path.setAttribute("stroke", "#e0e0e088");
+      path.setAttribute("stroke", arrowColor);
       path.setAttribute("stroke-width", "1.5");
       path.setAttribute("marker-end", "url(#arrow)");
       path.dataset.depId = d.id;
@@ -642,7 +712,7 @@
         path.setAttribute("marker-end", "url(#arrow-hover)");
       });
       hitPath.addEventListener("mouseleave", () => {
-        path.setAttribute("stroke", "#e0e0e088");
+        path.setAttribute("stroke", arrowColor);
         path.setAttribute("stroke-width", "1.5");
         path.setAttribute("marker-end", "url(#arrow)");
       });
@@ -718,6 +788,28 @@
 
   function setupCanvasDrag() {
     const canvas = $("#gantt-canvas");
+    canvas.addEventListener("dblclick", (e) => {
+      if (linkDrag) return;
+      const scrollArea = $("#chart-body");
+      const areaRect = scrollArea.getBoundingClientRect();
+      const mx = e.clientX - areaRect.left + scrollArea.scrollLeft;
+      const my = e.clientY - areaRect.top + scrollArea.scrollTop;
+      const taskList = viewMode === "tasks" ? tasks : resViewRows.flatMap((rv) => rv.tasks);
+      const rows = viewMode === "tasks" ? tasks.length : resViewRows.length;
+      const rowIdx = Math.floor(my / ROW_H);
+      if (rowIdx < 0 || rowIdx >= rows) return;
+      if (viewMode === "tasks") {
+        const t = tasks[rowIdx];
+        if (mx >= t._x1 && mx <= t._x2) openTaskModal(t);
+      } else {
+        const rv = resViewRows[rowIdx];
+        for (const t of rv.tasks) {
+          const x1 = dateToPx(t.start_date);
+          const x2 = dateToPx(t.end_date) + oneDayPx();
+          if (mx >= x1 && mx <= x2) { openTaskModal(tasks.find((tt) => tt.id === t.id) || t); break; }
+        }
+      }
+    });
     canvas.addEventListener("mousedown", (e) => {
       if (viewMode !== "tasks" || linkDrag) return;
       const scrollArea = $("#chart-body");
@@ -744,7 +836,8 @@
       const areaRect = scrollArea.getBoundingClientRect();
       const mx = e.clientX - areaRect.left + scrollArea.scrollLeft;
       const z = ZOOM_LEVELS[zoomIdx];
-      const deltaDays = Math.round((mx - dragStartX) / z.colW) * z.days;
+      const pxPerDay = z.colW / z.days;
+      const deltaDays = Math.round((mx - dragStartX) / pxPerDay);
       if (dragMode === "move") {
         dragTask.start_date = shiftDate(dragOrigStart, deltaDays);
         dragTask.end_date = shiftDate(dragOrigEnd, deltaDays);
@@ -927,16 +1020,17 @@
     const x2 = linkDrag.mx;
     const y2 = linkDrag.my;
 
+    const dragColor = lightMode ? "#333333" : "#ffffff";
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
     defs.innerHTML = `<marker id="link-arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-      <path d="M0,0 L8,3 L0,6 z" fill="#ffffffcc"/></marker>`;
+      <path d="M0,0 L8,3 L0,6 z" fill="${dragColor}cc"/></marker>`;
     svg.appendChild(defs);
 
     const midX = x1 + (x2 - x1) / 2;
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", `M${x1},${y1} C${midX},${y1} ${midX},${y2} ${x2},${y2}`);
     path.setAttribute("fill", "none");
-    path.setAttribute("stroke", "#ffffffaa");
+    path.setAttribute("stroke", dragColor + "aa");
     path.setAttribute("stroke-width", "2");
     path.setAttribute("stroke-dasharray", "6,3");
     path.setAttribute("marker-end", "url(#link-arrow)");
@@ -1203,6 +1297,111 @@
     $("#dep-modal").classList.add("open");
   }
 
+  // ── Theme manager ───────────────────────────────────────
+
+  function themePreviewHTML(vars) {
+    const colors = [vars["--bg"], vars["--surface"], vars["--surface2"], vars["--accent"], vars["--danger"]];
+    return colors.map((c) => `<span style="background:${c}"></span>`).join("");
+  }
+
+  function openThemeListModal() {
+    const body = $("#theme-list-body");
+    body.innerHTML = "";
+    const all = getAllThemes();
+    for (const [key, theme] of Object.entries(all)) {
+      const item = document.createElement("div");
+      item.className = "theme-list-item" + (key === currentTheme ? " active-theme" : "");
+      const badges = [];
+      if (theme.builtin) badges.push('<span class="theme-list-badge">built-in</span>');
+      if (key === currentTheme) badges.push('<span class="theme-list-badge">active</span>');
+      item.innerHTML = `
+        <div class="theme-preview">${themePreviewHTML(theme.vars)}</div>
+        <span class="theme-list-name">${esc(theme.name)}</span>
+        ${badges.join("")}
+        <div class="theme-list-actions">
+          <button class="btn btn-ghost btn-icon btn-apply" title="Apply">&#10003;</button>
+          ${theme.builtin ? '<button class="btn btn-ghost btn-icon btn-clone" title="Duplicate">&#128203;</button>' : '<button class="btn btn-ghost btn-icon btn-edit-theme" title="Edit">&#9998;</button>'}
+        </div>`;
+      item.querySelector(".btn-apply").addEventListener("click", (e) => {
+        e.stopPropagation();
+        applyTheme(key);
+        openThemeListModal();
+      });
+      if (theme.builtin) {
+        item.querySelector(".btn-clone").addEventListener("click", (e) => {
+          e.stopPropagation();
+          openThemeEditModal(null, theme);
+        });
+      } else {
+        item.querySelector(".btn-edit-theme").addEventListener("click", (e) => {
+          e.stopPropagation();
+          openThemeEditModal(key);
+        });
+      }
+      item.addEventListener("click", () => { applyTheme(key); openThemeListModal(); });
+      body.appendChild(item);
+    }
+    $("#theme-list-modal").classList.add("open");
+  }
+
+  function openThemeEditModal(editKey, cloneFrom) {
+    const isNew = !editKey;
+    const theme = editKey ? getTheme(editKey) : null;
+    const vars = theme ? theme.vars : (cloneFrom ? cloneFrom.vars : BUILTIN_THEMES.midnight.vars);
+    const name = theme ? theme.name : (cloneFrom ? cloneFrom.name + " Copy" : "New Theme");
+
+    $("#theme-edit-title").textContent = isNew ? "New Theme" : "Edit Theme";
+    $("#theme-edit-key").value = editKey || "";
+    $("#theme-edit-name").value = name;
+    $("#theme-bg").value = vars["--bg"];
+    $("#theme-surface").value = vars["--surface"];
+    $("#theme-surface2").value = vars["--surface2"];
+    $("#theme-border").value = vars["--border"];
+    $("#theme-text").value = vars["--text"];
+    $("#theme-text-dim").value = vars["--text-dim"];
+    $("#theme-accent").value = vars["--accent"];
+    $("#theme-danger").value = vars["--danger"];
+    $("#btn-theme-delete").style.display = (editKey && !getTheme(editKey)?.builtin) ? "inline-block" : "none";
+    updateThemePreview();
+    $("#theme-edit-modal").classList.add("open", "z-above");
+  }
+
+  function getThemeEditVars() {
+    return {
+      "--bg": $("#theme-bg").value,
+      "--surface": $("#theme-surface").value,
+      "--surface2": $("#theme-surface2").value,
+      "--border": $("#theme-border").value,
+      "--text": $("#theme-text").value,
+      "--text-dim": $("#theme-text-dim").value,
+      "--accent": $("#theme-accent").value,
+      "--danger": $("#theme-danger").value,
+    };
+  }
+
+  function updateThemePreview() {
+    const vars = getThemeEditVars();
+    const bar = $("#theme-preview-bar");
+    const colors = [
+      { c: vars["--bg"], l: "BG" }, { c: vars["--surface"], l: "Srf" },
+      { c: vars["--surface2"], l: "Srf2" }, { c: vars["--border"], l: "Bdr" },
+      { c: vars["--text"], l: "Txt" }, { c: vars["--text-dim"], l: "Dim" },
+      { c: vars["--accent"], l: "Acc" }, { c: vars["--danger"], l: "Dgr" },
+    ];
+    bar.innerHTML = colors.map((x) => {
+      const fg = isLightTheme({ "--bg": x.c }) ? "#000" : "#fff";
+      return `<span style="flex:1;background:${x.c};display:flex;align-items:center;justify-content:center;color:${fg};font-size:9px;font-weight:600">${x.l}</span>`;
+    }).join("");
+  }
+
+  function themeKeyFromName(name) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "custom";
+  }
+
+  function closeThemeEditModal() {
+    $("#theme-edit-modal").classList.remove("open", "z-above");
+  }
+
   function closeAllModals() {
     document.querySelectorAll(".modal-overlay").forEach((m) => m.classList.remove("open", "z-above"));
   }
@@ -1228,10 +1427,174 @@
     $("#btn-view-tasks").classList.toggle("active", mode === "tasks");
     $("#btn-view-resources").classList.toggle("active", mode === "resources");
     if (mode === "tasks") {
-      $(".sidebar-header").innerHTML = `<span class="col-name" data-col="0">Task<span class="col-resize-handle"></span></span><span class="col-resource" data-col="1">Resource<span class="col-resize-handle"></span></span><span class="col-dates" data-col="2">Start<span class="col-resize-handle"></span></span><span class="col-dates" data-col="3">End</span>`;
+      $(".sidebar-header").innerHTML = `<span class="col-name" data-col="0">Task<span class="col-resize-handle"></span></span><span class="col-dates" data-col="1">Start<span class="col-resize-handle"></span></span><span class="col-dates" data-col="2">End<span class="col-resize-handle"></span></span><span class="col-resource" data-col="3">Resource</span>`;
     }
     computeTimeline();
     render();
+  }
+
+  // ── Export PNG ─────────────────────────────────────────
+
+  function exportPNG() {
+    const canvas = $("#gantt-canvas");
+    const depSvg = $("#dep-svg");
+    const chartHeader = $("#chart-header");
+    const sidebar = $("#gantt-sidebar");
+    const sidebarBody = $("#sidebar-body");
+    const z = ZOOM_LEVELS[zoomIdx];
+
+    const sidebarVisible = !sidebarCollapsed;
+    const headerH = 48;
+
+    // Compute sidebar column widths from the actual rendered header spans
+    const hdrSpans = Array.from(sidebar.querySelector(".sidebar-header").children);
+    const exportColWidths = hdrSpans.map((s) => s.getBoundingClientRect().width);
+    const sbW = sidebarVisible ? exportColWidths.reduce((a, b) => a + b, 0) : 0;
+
+    // Clip chart width to last bar + small margin instead of full canvas
+    const dataList = viewMode === "tasks" ? tasks : tasks;
+    let maxBarPx = 0;
+    for (const t of dataList) {
+      const barEnd = dateToPx(t.end_date) + oneDayPx();
+      if (barEnd > maxBarPx) maxBarPx = barEnd;
+    }
+    const chartPad = z.colW * 3;
+    const chartW = Math.min(canvas.width, Math.ceil(maxBarPx + chartPad));
+    const chartH = canvas.height;
+    const totalW = sbW + chartW;
+    const totalH = headerH + chartH;
+
+    // Count how many header columns fit in the clipped chart width
+    const exportCols = Math.ceil(chartW / z.colW);
+
+    const out = document.createElement("canvas");
+    out.width = totalW;
+    out.height = totalH;
+    const ctx = out.getContext("2d");
+
+    const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+    const colBg = css("--bg") || "#1a1a2e";
+    const colSurface = css("--surface") || "#16213e";
+    const colBorder = css("--border") || "#1a4080";
+    const colText = css("--text") || "#e0e0e0";
+    const colDim = css("--text-dim") || "#8899aa";
+
+    // Background
+    ctx.fillStyle = colBg;
+    ctx.fillRect(0, 0, totalW, totalH);
+
+    // Draw sidebar header + rows
+    if (sidebarVisible) {
+      ctx.fillStyle = colSurface;
+      ctx.fillRect(0, 0, sbW, totalH);
+
+      ctx.strokeStyle = colBorder;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(sbW, 0); ctx.lineTo(sbW, totalH); ctx.stroke();
+
+      // Sidebar header text
+      ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.fillStyle = colDim;
+      let colX = 0;
+      for (let i = 0; i < hdrSpans.length; i++) {
+        const w = exportColWidths[i];
+        ctx.fillText(hdrSpans[i].textContent.trim(), colX + 8, headerH / 2 + 4);
+        // Column separator
+        ctx.strokeStyle = colBorder;
+        if (i < hdrSpans.length - 1) {
+          ctx.beginPath(); ctx.moveTo(colX + w, 0); ctx.lineTo(colX + w, headerH); ctx.stroke();
+        }
+        colX += w;
+      }
+      ctx.strokeStyle = colBorder;
+      ctx.beginPath(); ctx.moveTo(0, headerH); ctx.lineTo(sbW, headerH); ctx.stroke();
+
+      // Sidebar rows
+      const rows = sidebarBody.children;
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const y = headerH + i * ROW_H;
+        const spans = Array.from(row.children);
+        let cx = 0;
+        for (let j = 0; j < spans.length; j++) {
+          const w = j < exportColWidths.length ? exportColWidths[j] : spans[j].offsetWidth;
+          const isDim = spans[j].classList.contains("col-dates");
+          ctx.fillStyle = isDim ? colDim : colText;
+          ctx.font = isDim ? "11px -apple-system, BlinkMacSystemFont, sans-serif"
+                           : "13px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(cx, y, w, ROW_H);
+          ctx.clip();
+          ctx.fillText(spans[j].textContent.trim(), cx + 8, y + ROW_H / 2 + 4);
+          ctx.restore();
+          cx += w;
+        }
+        ctx.strokeStyle = colBorder;
+        ctx.beginPath(); ctx.moveTo(0, y + ROW_H); ctx.lineTo(sbW, y + ROW_H); ctx.stroke();
+      }
+    }
+
+    // Draw chart header (only columns that fit in clipped width)
+    ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillStyle = colDim;
+    ctx.strokeStyle = colBorder;
+    for (let i = 0; i < exportCols; i++) {
+      const d = new Date(timeOrigin.getTime() + i * z.days * 86400000);
+      const x = sbW + i * z.colW;
+      if (z.days <= 1) {
+        ctx.fillText(String(d.getDate()), x + 4, headerH / 2);
+        ctx.save();
+        ctx.font = "10px -apple-system, BlinkMacSystemFont, sans-serif";
+        const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        ctx.fillText(MONTHS[d.getMonth()], x + 4, headerH / 2 + 12);
+        ctx.restore();
+        ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
+      } else if (z.days <= 7) {
+        const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        ctx.fillText(MONTHS[d.getMonth()] + " " + d.getDate(), x + 4, headerH / 2 + 4);
+      } else {
+        const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        ctx.fillText(MONTHS[d.getMonth()] + " " + d.getDate(), x + 4, headerH / 2);
+        ctx.save();
+        ctx.font = "10px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText(String(d.getFullYear()), x + 4, headerH / 2 + 12);
+        ctx.restore();
+        ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
+      }
+      ctx.beginPath(); ctx.moveTo(x + z.colW, 0); ctx.lineTo(x + z.colW, headerH); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(sbW, headerH); ctx.lineTo(totalW, headerH); ctx.stroke();
+
+    // Draw the Gantt canvas (clipped)
+    ctx.drawImage(canvas, 0, 0, chartW, chartH, sbW, headerH, chartW, chartH);
+
+    // Draw SVG dependency arrows
+    const svgClone = depSvg.cloneNode(true);
+    svgClone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    svgClone.setAttribute("width", chartW);
+    svgClone.setAttribute("height", chartH);
+    const svgData = new XMLSerializer().serializeToString(svgClone);
+    const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, chartW, chartH, sbW, headerH, chartW, chartH);
+      URL.revokeObjectURL(url);
+      triggerDownload(out);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      triggerDownload(out);
+    };
+    img.src = url;
+  }
+
+  function triggerDownload(canvasEl) {
+    const link = document.createElement("a");
+    link.download = "gantt-export.png";
+    link.href = canvasEl.toDataURL("image/png");
+    link.click();
   }
 
   // ── Event bindings ────────────────────────────────────
@@ -1246,8 +1609,13 @@
     });
     $("#btn-manage-projects").addEventListener("click", () => openProjectListModal());
     $("#btn-settings").addEventListener("click", () => openSettingsModal());
+    $("#btn-export-png").addEventListener("click", () => exportPNG());
+    $("#btn-themes").addEventListener("click", () => openThemeListModal());
+    $("#btn-help").addEventListener("click", () => { $("#help-modal").classList.add("open"); });
+    $("#btn-help-close").addEventListener("click", () => { $("#help-modal").classList.remove("open"); });
     $("#btn-seed").addEventListener("click", async () => {
       await api("/api/seed", "POST");
+      closeAllModals();
       await loadAll();
     });
 
@@ -1419,6 +1787,48 @@
     });
     $("#btn-settings-cancel").addEventListener("click", closeAllModals);
 
+    // Theme manager
+    $("#btn-add-theme").addEventListener("click", () => openThemeEditModal(null));
+    $("#btn-theme-list-close").addEventListener("click", () => { $("#theme-list-modal").classList.remove("open"); });
+    $("#btn-theme-edit-cancel").addEventListener("click", closeThemeEditModal);
+    // Live preview as colors change
+    for (const id of ["theme-bg","theme-surface","theme-surface2","theme-border","theme-text","theme-text-dim","theme-accent","theme-danger"]) {
+      document.getElementById(id).addEventListener("input", updateThemePreview);
+    }
+    $("#theme-edit-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const editKey = $("#theme-edit-key").value;
+      const name = $("#theme-edit-name").value.trim();
+      if (!name) return;
+      const vars = getThemeEditVars();
+      let finalKey;
+      if (editKey) {
+        finalKey = editKey;
+      } else {
+        finalKey = themeKeyFromName(name);
+        if (BUILTIN_THEMES[finalKey] || customThemes[finalKey]) {
+          let i = 2;
+          while (BUILTIN_THEMES[finalKey + "-" + i] || customThemes[finalKey + "-" + i]) i++;
+          finalKey = finalKey + "-" + i;
+        }
+      }
+      customThemes[finalKey] = { name, vars };
+      saveCustomThemes();
+      applyTheme(finalKey);
+      closeThemeEditModal();
+      openThemeListModal();
+    });
+    $("#btn-theme-delete").addEventListener("click", () => {
+      const key = $("#theme-edit-key").value;
+      if (!key || BUILTIN_THEMES[key]) return;
+      if (!confirm("Delete this theme?")) return;
+      delete customThemes[key];
+      saveCustomThemes();
+      if (currentTheme === key) applyTheme("midnight");
+      closeThemeEditModal();
+      openThemeListModal();
+    });
+
     // Dependency form
     $("#dep-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -1444,12 +1854,14 @@
         if (e.target !== overlay) return;
         if (overlay.id === "resource-modal") closeResourceModal();
         else if (overlay.id === "project-modal") closeProjectModal();
+        else if (overlay.id === "theme-edit-modal") closeThemeEditModal();
         else overlay.classList.remove("open");
       });
     });
     document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
-      if ($("#resource-modal").classList.contains("open")) closeResourceModal();
+      if ($("#theme-edit-modal").classList.contains("open")) closeThemeEditModal();
+      else if ($("#resource-modal").classList.contains("open")) closeResourceModal();
       else if ($("#project-modal").classList.contains("open")) closeProjectModal();
       else closeAllModals();
     });
@@ -1469,6 +1881,11 @@
     const d = parseLocal(dateStr);
     const z = ZOOM_LEVELS[zoomIdx];
     return ((d.getTime() - timeOrigin.getTime()) / (z.days * 86400000)) * z.colW;
+  }
+
+  function oneDayPx() {
+    const z = ZOOM_LEVELS[zoomIdx];
+    return z.colW / z.days;
   }
 
   function timeToPx(ts) {
@@ -1522,6 +1939,7 @@
       currentProjectId,
       sidebarCollapsed,
       sidebarWidth,
+      theme: currentTheme,
     };
     try { localStorage.setItem(UI_STATE_KEY, JSON.stringify(state)); } catch {}
   }
@@ -1537,6 +1955,7 @@
       if (s.currentProjectId != null) currentProjectId = s.currentProjectId;
       if (typeof s.sidebarCollapsed === "boolean") sidebarCollapsed = s.sidebarCollapsed;
       if (typeof s.sidebarWidth === "number" && s.sidebarWidth >= 120) sidebarWidth = s.sidebarWidth;
+      if (s.theme && getTheme(s.theme)) currentTheme = s.theme;
     } catch {}
   }
 
@@ -1655,6 +2074,7 @@
   loadUIState();
 
   // Apply restored state to UI
+  applyTheme(currentTheme);
   $("#zoom-label").textContent = ZOOM_LEVELS[zoomIdx].name;
   applyVZoom();
   applySidebarWidth();
