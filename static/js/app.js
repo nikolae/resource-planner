@@ -12,6 +12,13 @@
     { name: "2-Week", days: 14, colW: 90 },
     { name: "Month", days: 30, colW: 100 },
   ];
+  const PRESET_COLORS = [
+    "#4a86c8", "#e8743b", "#19a979", "#e74c3c", "#9b59b6",
+    "#f39c12", "#1abc9c", "#3498db", "#2ecc71", "#e91e63",
+    "#00bcd4", "#ff9800", "#8bc34a", "#795548", "#607d8b",
+    "#673ab7", "#ff5722", "#009688", "#cddc39", "#ffc107",
+  ];
+  const MAX_RECENTS = 8;
   let zoomIdx = 0;
 
   let tasks = [];
@@ -21,6 +28,7 @@
   let currentProjectId = null;
   let timeOrigin;
   let timeCols;
+  let recentColors = loadRecentColors();
 
   const $ = (s) => document.querySelector(s);
   const api = async (url, method = "GET", body) => {
@@ -30,6 +38,86 @@
     if (r.status === 204) return null;
     return r.json();
   };
+
+  // ── Recent colors (localStorage) ─────────────────────
+
+  function loadRecentColors() {
+    try {
+      return JSON.parse(localStorage.getItem("rp_recent_colors") || "[]");
+    } catch { return []; }
+  }
+
+  function saveRecentColor(color) {
+    color = color.toLowerCase();
+    recentColors = recentColors.filter((c) => c !== color);
+    recentColors.unshift(color);
+    if (recentColors.length > MAX_RECENTS) recentColors.length = MAX_RECENTS;
+    localStorage.setItem("rp_recent_colors", JSON.stringify(recentColors));
+  }
+
+  // ── Color picker widget ───────────────────────────────
+
+  function initColorPickers() {
+    document.querySelectorAll(".color-picker-group").forEach((group) => {
+      const input = group.querySelector('input[type="color"]');
+      const swatchesEl = group.querySelector(".color-swatches");
+      const recentsEl = group.querySelector(".color-recents");
+
+      swatchesEl.innerHTML = "";
+      for (const c of PRESET_COLORS) {
+        const sw = document.createElement("div");
+        sw.className = "color-swatch";
+        sw.style.background = c;
+        sw.dataset.color = c;
+        sw.addEventListener("click", () => {
+          input.value = c;
+          input.dispatchEvent(new Event("input"));
+          markActive(group, c);
+        });
+        swatchesEl.appendChild(sw);
+      }
+
+      renderRecents(group);
+
+      input.addEventListener("input", () => markActive(group, input.value));
+    });
+  }
+
+  function renderRecents(group) {
+    const input = group.querySelector('input[type="color"]');
+    const recentsEl = group.querySelector(".color-recents");
+    recentsEl.innerHTML = "";
+    for (const c of recentColors) {
+      const sw = document.createElement("div");
+      sw.className = "color-swatch";
+      sw.style.background = c;
+      sw.dataset.color = c;
+      sw.addEventListener("click", () => {
+        input.value = c;
+        input.dispatchEvent(new Event("input"));
+        markActive(group, c);
+      });
+      recentsEl.appendChild(sw);
+    }
+  }
+
+  function refreshAllRecents() {
+    document.querySelectorAll(".color-picker-group").forEach(renderRecents);
+  }
+
+  function markActive(group, color) {
+    color = color.toLowerCase();
+    group.querySelectorAll(".color-swatch").forEach((sw) => {
+      sw.classList.toggle("active", sw.dataset.color === color);
+    });
+  }
+
+  function syncPickerToValue(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const group = input.closest(".color-picker-group");
+    if (group) markActive(group, input.value);
+  }
 
   // ── Data fetching ─────────────────────────────────────
 
@@ -51,9 +139,15 @@
     render();
   }
 
+  async function loadConfig() {
+    const cfg = await api("/api/config");
+    const title = cfg.app_name || "Resource Planner";
+    $("#app-title").textContent = title;
+    document.title = title;
+  }
+
   function populateProjectSelect() {
     const sel = $("#project-select");
-    const prev = sel.value;
     sel.innerHTML = '<option value="">All Projects</option>';
     for (const p of projects) {
       const opt = document.createElement("option");
@@ -154,38 +248,26 @@
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, totalW, totalH);
 
-    // grid lines
     ctx.strokeStyle = "#1a406030";
     ctx.lineWidth = 1;
     for (let i = 0; i <= timeCols; i++) {
       const x = i * z.colW;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, totalH);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, totalH); ctx.stroke();
     }
     for (let i = 0; i <= tasks.length; i++) {
       const y = i * ROW_H;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(totalW, y);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(totalW, y); ctx.stroke();
     }
 
-    // today marker
     const todayX = dateToPx(todayStr());
     if (todayX >= 0 && todayX <= totalW) {
       ctx.fillStyle = "#e74c3c22";
       ctx.fillRect(todayX, 0, z.colW, totalH);
       ctx.strokeStyle = "#e74c3c88";
       ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(todayX, 0);
-      ctx.lineTo(todayX, totalH);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(todayX, 0); ctx.lineTo(todayX, totalH); ctx.stroke();
     }
 
-    // bars
     for (let i = 0; i < tasks.length; i++) {
       const t = tasks[i];
       const x1 = dateToPx(t.start_date);
@@ -193,58 +275,38 @@
       const y = i * ROW_H + BAR_PAD;
       const w = Math.max(x2 - x1, 8);
 
-      // bar background
       ctx.fillStyle = t.color + "55";
-      ctx.beginPath();
-      roundRect(ctx, x1, y, w, BAR_H, 4);
-      ctx.fill();
+      ctx.beginPath(); roundRect(ctx, x1, y, w, BAR_H, 4); ctx.fill();
 
-      // progress fill
       if (t.progress > 0) {
         ctx.fillStyle = t.color + "cc";
         const pw = (w * t.progress) / 100;
-        ctx.beginPath();
-        roundRect(ctx, x1, y, pw, BAR_H, 4);
-        ctx.fill();
+        ctx.beginPath(); roundRect(ctx, x1, y, pw, BAR_H, 4); ctx.fill();
       }
 
-      // border
       ctx.strokeStyle = t.color;
       ctx.lineWidth = 1;
-      ctx.beginPath();
-      roundRect(ctx, x1, y, w, BAR_H, 4);
-      ctx.stroke();
+      ctx.beginPath(); roundRect(ctx, x1, y, w, BAR_H, 4); ctx.stroke();
 
-      // label
       ctx.fillStyle = "#fff";
       ctx.font = "11px -apple-system, sans-serif";
       ctx.textBaseline = "middle";
-      const label = t.name;
       const maxTextW = w - 8;
       if (maxTextW > 20) {
         ctx.save();
-        ctx.beginPath();
-        ctx.rect(x1 + 4, y, maxTextW, BAR_H);
-        ctx.clip();
-        ctx.fillText(label, x1 + 6, y + BAR_H / 2);
+        ctx.beginPath(); ctx.rect(x1 + 4, y, maxTextW, BAR_H); ctx.clip();
+        ctx.fillText(t.name, x1 + 6, y + BAR_H / 2);
         ctx.restore();
       }
 
-      // resize handles on hover
       if (hoverInfo && hoverInfo.taskIdx === i && !dragTask) {
-        const handleW = 4;
-        const handleH = BAR_H - 6;
-        const handleY = y + 3;
+        const handleW = 4, handleH = BAR_H - 6, handleY = y + 3;
         ctx.fillStyle = "#ffffffbb";
         if (hoverInfo.edge === "start" || hoverInfo.edge === "both") {
-          ctx.beginPath();
-          roundRect(ctx, x1 + 2, handleY, handleW, handleH, 2);
-          ctx.fill();
+          ctx.beginPath(); roundRect(ctx, x1 + 2, handleY, handleW, handleH, 2); ctx.fill();
         }
         if (hoverInfo.edge === "end" || hoverInfo.edge === "both") {
-          ctx.beginPath();
-          roundRect(ctx, x1 + w - handleW - 2, handleY, handleW, handleH, 2);
-          ctx.fill();
+          ctx.beginPath(); roundRect(ctx, x1 + w - handleW - 2, handleY, handleW, handleH, 2); ctx.fill();
         }
       }
 
@@ -253,7 +315,6 @@
       t._y = y;
     }
 
-    // resize SVG overlay
     const svg = $("#dep-svg");
     svg.setAttribute("width", totalW);
     svg.setAttribute("height", totalH);
@@ -335,13 +396,9 @@
       const my = e.clientY - rect.top + scrollArea.scrollTop;
       const hit = hitTest(mx, my);
 
-      if (hit && hit.edge) {
-        canvas.style.cursor = "col-resize";
-      } else if (hit) {
-        canvas.style.cursor = "grab";
-      } else {
-        canvas.style.cursor = "default";
-      }
+      if (hit && hit.edge) canvas.style.cursor = "col-resize";
+      else if (hit) canvas.style.cursor = "grab";
+      else canvas.style.cursor = "default";
 
       const hoverKey = hit ? `${hit.taskIdx}:${hit.edge}` : null;
       if (hoverKey !== lastHover) {
@@ -459,7 +516,7 @@
     $("#btn-task-delete").style.display = t ? "block" : "none";
 
     const resSel = $("#task-resource");
-    resSel.innerHTML = '<option value="">— none —</option>';
+    resSel.innerHTML = '<option value="">\u2014 none \u2014</option>';
     for (const r of resources) {
       const opt = document.createElement("option");
       opt.value = r.id;
@@ -469,7 +526,7 @@
     }
 
     const projSel = $("#task-project");
-    projSel.innerHTML = '<option value="">— none —</option>';
+    projSel.innerHTML = '<option value="">\u2014 none \u2014</option>';
     for (const p of projects) {
       const opt = document.createElement("option");
       opt.value = p.id;
@@ -480,7 +537,7 @@
     }
 
     const parentSel = $("#task-parent");
-    parentSel.innerHTML = '<option value="">— none —</option>';
+    parentSel.innerHTML = '<option value="">\u2014 none \u2014</option>';
     for (const pt of tasks) {
       if (t && pt.id === t.id) continue;
       const opt = document.createElement("option");
@@ -490,17 +547,76 @@
       parentSel.appendChild(opt);
     }
 
+    refreshAllRecents();
+    syncPickerToValue("task-color");
     $("#task-modal").classList.add("open");
   }
 
-  function openResourceModal(r) {
+  let resModalFromList = false;
+
+  function openResourceModal(r, fromList) {
+    resModalFromList = !!fromList;
     $("#resource-modal-title").textContent = r ? "Edit Resource" : "New Resource";
     $("#res-id").value = r ? r.id : "";
     $("#res-name").value = r ? r.name : "";
     $("#res-role").value = r ? r.role : "";
     $("#res-color").value = r ? r.color : "#4a86c8";
     $("#btn-res-delete").style.display = r ? "block" : "none";
-    $("#resource-modal").classList.add("open");
+    refreshAllRecents();
+    syncPickerToValue("res-color");
+    const modal = $("#resource-modal");
+    modal.classList.toggle("z-above", resModalFromList);
+    modal.classList.add("open");
+  }
+
+  function closeResourceModal() {
+    $("#resource-modal").classList.remove("open", "z-above");
+    if (resModalFromList) {
+      resModalFromList = false;
+      renderResourceList();
+    }
+  }
+
+  function openResourceListModal() {
+    renderResourceList();
+    $("#resource-list-modal").classList.add("open");
+  }
+
+  function renderResourceList() {
+    const body = $("#resource-list-body");
+    body.innerHTML = "";
+    if (resources.length === 0) {
+      body.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:12px 0">No resources yet. Click "+ Add Resource" to create one.</p>';
+      return;
+    }
+    for (const r of resources) {
+      const item = document.createElement("div");
+      item.className = "resource-list-item";
+      item.innerHTML = `
+        <span class="resource-list-dot" style="background:${r.color}"></span>
+        <span class="resource-list-name">${esc(r.name)}</span>
+        <span class="resource-list-role">${esc(r.role || "\u2014")}</span>
+        <span class="resource-list-actions">
+          <button class="btn btn-ghost btn-icon btn-res-edit" data-id="${r.id}" title="Edit">&#9998;</button>
+          <button class="btn btn-ghost btn-icon btn-res-del" data-id="${r.id}" title="Delete">&times;</button>
+        </span>`;
+      body.appendChild(item);
+    }
+    body.querySelectorAll(".btn-res-edit").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const r = resources.find((r) => r.id === parseInt(btn.dataset.id));
+        if (r) openResourceModal(r, true);
+      });
+    });
+    body.querySelectorAll(".btn-res-del").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (confirm("Delete this resource?")) {
+          await api(`/api/resources/${btn.dataset.id}`, "DELETE");
+          await loadAll();
+          renderResourceList();
+        }
+      });
+    });
   }
 
   function openProjectModal(p) {
@@ -510,11 +626,14 @@
     $("#proj-desc").value = p ? p.description : "";
     $("#proj-color").value = p ? p.color : "#4a86c8";
     $("#btn-proj-delete").style.display = p ? "block" : "none";
+    refreshAllRecents();
+    syncPickerToValue("proj-color");
     $("#project-modal").classList.add("open");
   }
 
   async function openSettingsModal() {
     const cfg = await api("/api/config");
+    $("#cfg-app-name").value = cfg.app_name || "Resource Planner";
     $("#cfg-host").value = cfg.host;
     $("#cfg-port").value = cfg.port;
     $("#cfg-debug").value = String(cfg.debug);
@@ -567,9 +686,8 @@
   // ── Event bindings ────────────────────────────────────
 
   function setupEvents() {
-    // header buttons
     $("#btn-add-task").addEventListener("click", () => openTaskModal(null));
-    $("#btn-add-resource").addEventListener("click", () => openResourceModal(null));
+    $("#btn-manage-resources").addEventListener("click", () => openResourceListModal());
     $("#btn-add-project").addEventListener("click", () => openProjectModal(null));
     $("#btn-edit-project").addEventListener("click", () => {
       const p = projects.find((p) => p.id === currentProjectId);
@@ -599,6 +717,8 @@
     $("#task-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const id = $("#task-id").value;
+      const color = $("#task-color").value;
+      saveRecentColor(color);
       const data = {
         name: $("#task-name").value,
         description: $("#task-desc").value,
@@ -606,7 +726,7 @@
         end_date: $("#task-end").value,
         progress: parseInt($("#task-progress").value) || 0,
         resource_id: $("#task-resource").value ? parseInt($("#task-resource").value) : null,
-        color: $("#task-color").value,
+        color: color,
         parent_id: $("#task-parent").value ? parseInt($("#task-parent").value) : null,
         project_id: $("#task-project").value ? parseInt($("#task-project").value) : null,
       };
@@ -630,35 +750,45 @@
     $("#resource-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const id = $("#res-id").value;
+      const color = $("#res-color").value;
+      saveRecentColor(color);
       const data = {
         name: $("#res-name").value,
         role: $("#res-role").value,
-        color: $("#res-color").value,
+        color: color,
       };
       if (id) await api(`/api/resources/${id}`, "PUT", data);
       else await api("/api/resources", "POST", data);
-      closeAllModals();
       await loadAll();
+      closeResourceModal();
     });
 
-    $("#btn-res-cancel").addEventListener("click", closeAllModals);
+    $("#btn-res-cancel").addEventListener("click", closeResourceModal);
     $("#btn-res-delete").addEventListener("click", async () => {
       const id = $("#res-id").value;
       if (id && confirm("Delete this resource?")) {
         await api(`/api/resources/${id}`, "DELETE");
-        closeAllModals();
         await loadAll();
+        closeResourceModal();
       }
+    });
+
+    // resource list modal
+    $("#btn-add-resource-from-list").addEventListener("click", () => openResourceModal(null, true));
+    $("#btn-res-list-close").addEventListener("click", () => {
+      $("#resource-list-modal").classList.remove("open");
     });
 
     // project form
     $("#project-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const id = $("#proj-id").value;
+      const color = $("#proj-color").value;
+      saveRecentColor(color);
       const data = {
         name: $("#proj-name").value,
         description: $("#proj-desc").value,
-        color: $("#proj-color").value,
+        color: color,
       };
       if (id) await api(`/api/projects/${id}`, "PUT", data);
       else {
@@ -683,12 +813,16 @@
     // settings form
     $("#settings-form").addEventListener("submit", async (e) => {
       e.preventDefault();
+      const appName = $("#cfg-app-name").value;
       await api("/api/config", "PUT", {
+        app_name: appName,
         host: $("#cfg-host").value,
         port: parseInt($("#cfg-port").value),
         debug: $("#cfg-debug").value === "true",
         database_uri: $("#cfg-db-uri").value,
       });
+      $("#app-title").textContent = appName;
+      document.title = appName;
       closeAllModals();
     });
 
@@ -718,16 +852,19 @@
     $("#ctx-add-dep").addEventListener("click", () => openDepModal(ctxTask));
     $("#ctx-edit-task").addEventListener("click", () => { if (ctxTask) openTaskModal(ctxTask); });
 
-    // close modals on overlay click
+    // close modals on overlay click — only the topmost
     document.querySelectorAll(".modal-overlay").forEach((overlay) => {
       overlay.addEventListener("click", (e) => {
-        if (e.target === overlay) closeAllModals();
+        if (e.target !== overlay) return;
+        if (overlay.id === "resource-modal") closeResourceModal();
+        else overlay.classList.remove("open");
       });
     });
 
-    // keyboard
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeAllModals();
+      if (e.key !== "Escape") return;
+      if ($("#resource-modal").classList.contains("open")) closeResourceModal();
+      else closeAllModals();
     });
   }
 
@@ -742,9 +879,7 @@
     return (diff / (z.days * 86400000)) * z.colW;
   }
 
-  function todayStr() {
-    return new Date().toISOString().slice(0, 10);
-  }
+  function todayStr() { return new Date().toISOString().slice(0, 10); }
 
   function shiftDate(dateStr, days) {
     const d = new Date(dateStr);
@@ -777,9 +912,11 @@
 
   // ── Init ──────────────────────────────────────────────
 
+  initColorPickers();
   setupEvents();
   setupScrollSync();
   setupCanvasDrag();
   setupCanvasHover();
+  loadConfig();
   loadAll();
 })();

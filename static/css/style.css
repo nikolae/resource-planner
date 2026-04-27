@@ -201,6 +201,7 @@ main { flex: 1; overflow: hidden; }
   align-items: center;
 }
 .modal-overlay.open { display: flex; }
+.modal-overlay.z-above { z-index: 110; }
 
 .modal {
   background: var(--surface);
@@ -233,6 +234,75 @@ main { flex: 1; overflow: hidden; }
 .form-row { display: flex; gap: 12px; }
 .form-row > label { flex: 1; }
 .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+.modal-wide { width: 520px; }
+.modal-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.modal-header-row h2 { margin-bottom: 0; }
+
+/* Resource list */
+.resource-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.resource-list-item:hover { background: var(--surface2); }
+.resource-list-dot {
+  width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+}
+.resource-list-name { flex: 1; font-weight: 500; }
+.resource-list-role { flex: 1; color: var(--text-dim); }
+.resource-list-actions { display: flex; gap: 4px; }
+
+/* Color picker group */
+.color-picker-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.color-picker-group input[type="color"] { margin-top: 0; }
+.color-swatches, .color-recents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.color-swatches::before {
+  content: "Presets";
+  display: block;
+  width: 100%;
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 2px;
+}
+.color-recents:not(:empty)::before {
+  content: "Recent";
+  display: block;
+  width: 100%;
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 2px;
+}
+.color-swatch {
+  width: 22px; height: 22px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color .1s, transform .1s;
+}
+.color-swatch:hover { transform: scale(1.15); }
+.color-swatch.active { border-color: #fff; }
 
 /* Context menu */
 .context-menu {

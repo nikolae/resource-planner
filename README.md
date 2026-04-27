@@ -31,7 +31,9 @@ A Python/Flask web application for multi-project resource planning with an inter
 - New tasks default to the currently selected project
 
 ### Resources
-- Create, edit, and delete resources (people/roles)
+- "Resources" button in the header opens a list view of all resources
+- Each resource shows its color, name, and role with inline edit and delete buttons
+- Create new resources from the list view via "+ Add Resource"
 - Fields: name, role, color
 - Assign resources to tasks; task bars inherit the resource color unless overridden
 - Resources are shared across all projects
@@ -48,10 +50,17 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Duplicate and self-referencing dependencies are rejected
 - Dependencies are filtered with the project view
 
+### Color Picker
+- All color inputs (tasks, resources, projects) include a palette of 20 preset swatches
+- Recently used colors (up to 8) are shown below the presets, persisted in browser localStorage
+- Click any swatch to select it; the active color is highlighted with a white border
+- The native color picker is still available for custom colors
+
 ### Settings
 - Gear icon in the header opens a settings modal
-- Editable parameters: host, port, debug mode, database URI
-- Settings are persisted to `config.json` and take effect on next server restart
+- Editable parameters: application name, host, port, debug mode, database URI
+- The application name controls the header title and browser tab title, and takes effect immediately
+- Settings are persisted to `config.json`; host, port, and database URI changes require a server restart
 
 ### Demo Data
 - Click "Load Demo Data" in the header to populate two sample projects with resources, tasks, and dependencies
@@ -76,9 +85,19 @@ Server settings are stored in `config.json` in the project root:
   "port": 5000,
   "debug": true,
   "database_uri": "sqlite:///planner.db",
-  "secret_key": "change-me-in-production"
+  "secret_key": "change-me-in-production",
+  "app_name": "Resource Planner"
 }
 ```
+
+| Key            | Description                                      | Restart required |
+|----------------|--------------------------------------------------|------------------|
+| `app_name`     | Application name shown in header and browser tab | No               |
+| `host`         | Server bind address                              | Yes              |
+| `port`         | Server port                                      | Yes              |
+| `debug`        | Flask debug mode                                 | Yes              |
+| `database_uri` | SQLAlchemy database connection string            | Yes              |
+| `secret_key`   | Flask secret key (not exposed via API)           | Yes              |
 
 Edit this file directly, or use the settings modal in the web UI (gear icon). Changes to host, port, and database URI require a server restart.
 

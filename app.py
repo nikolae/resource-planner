@@ -13,6 +13,7 @@ def load_config():
         "debug": True,
         "database_uri": "sqlite:///planner.db",
         "secret_key": "change-me-in-production",
+        "app_name": "Resource Planner",
     }
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH) as f:
@@ -45,7 +46,7 @@ def get_config():
 @app.route("/api/config", methods=["PUT"])
 def update_config():
     data = request.json
-    allowed = {"host", "port", "debug", "database_uri"}
+    allowed = {"host", "port", "debug", "database_uri", "app_name"}
     for key in data:
         if key in allowed:
             config[key] = data[key]

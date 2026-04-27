@@ -9,7 +9,7 @@
 <body>
   <header>
     <div class="header-left">
-      <h1>Resource Planner</h1>
+      <h1 id="app-title">Resource Planner</h1>
       <div class="project-selector">
         <select id="project-select">
           <option value="">All Projects</option>
@@ -20,7 +20,7 @@
     </div>
     <div class="header-actions">
       <button id="btn-add-task" class="btn btn-primary">+ Task</button>
-      <button id="btn-add-resource" class="btn btn-secondary">+ Resource</button>
+      <button id="btn-manage-resources" class="btn btn-secondary">Resources</button>
       <button id="btn-seed" class="btn btn-ghost">Load Demo Data</button>
       <button id="btn-settings" class="btn btn-ghost btn-icon" title="Settings">&#9881;</button>
       <div class="zoom-controls">
@@ -73,7 +73,13 @@
           </label>
         </div>
         <div class="form-row">
-          <label>Color <input type="color" id="task-color" value="#4a86c8"></label>
+          <label>Color
+            <div class="color-picker-group" data-target="task-color">
+              <input type="color" id="task-color" value="#4a86c8">
+              <div class="color-swatches"></div>
+              <div class="color-recents"></div>
+            </div>
+          </label>
           <label>Project
             <select id="task-project"><option value="">— none —</option></select>
           </label>
@@ -92,7 +98,7 @@
     </div>
   </div>
 
-  <!-- Resource modal -->
+  <!-- Resource edit modal -->
   <div class="modal-overlay" id="resource-modal">
     <div class="modal">
       <h2 id="resource-modal-title">New Resource</h2>
@@ -100,13 +106,33 @@
         <input type="hidden" id="res-id">
         <label>Name <input type="text" id="res-name" required></label>
         <label>Role <input type="text" id="res-role"></label>
-        <label>Color <input type="color" id="res-color" value="#4a86c8"></label>
+        <label>Color
+          <div class="color-picker-group" data-target="res-color">
+            <input type="color" id="res-color" value="#4a86c8">
+            <div class="color-swatches"></div>
+            <div class="color-recents"></div>
+          </div>
+        </label>
         <div class="form-actions">
           <button type="button" class="btn btn-ghost" id="btn-res-cancel">Cancel</button>
           <button type="button" class="btn btn-danger" id="btn-res-delete" style="display:none">Delete</button>
           <button type="submit" class="btn btn-primary">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Resource list modal -->
+  <div class="modal-overlay" id="resource-list-modal">
+    <div class="modal modal-wide">
+      <div class="modal-header-row">
+        <h2>Resources</h2>
+        <button type="button" class="btn btn-primary" id="btn-add-resource-from-list">+ Add Resource</button>
+      </div>
+      <div id="resource-list-body"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="btn-res-list-close">Close</button>
+      </div>
     </div>
   </div>
 
@@ -118,7 +144,13 @@
         <input type="hidden" id="proj-id">
         <label>Name <input type="text" id="proj-name" required></label>
         <label>Description <textarea id="proj-desc" rows="2"></textarea></label>
-        <label>Color <input type="color" id="proj-color" value="#4a86c8"></label>
+        <label>Color
+          <div class="color-picker-group" data-target="proj-color">
+            <input type="color" id="proj-color" value="#4a86c8">
+            <div class="color-swatches"></div>
+            <div class="color-recents"></div>
+          </div>
+        </label>
         <div class="form-actions">
           <button type="button" class="btn btn-ghost" id="btn-proj-cancel">Cancel</button>
           <button type="button" class="btn btn-danger" id="btn-proj-delete" style="display:none">Delete</button>
@@ -133,6 +165,7 @@
     <div class="modal">
       <h2>Settings</h2>
       <form id="settings-form">
+        <label>Application Name <input type="text" id="cfg-app-name"></label>
         <label>Host <input type="text" id="cfg-host"></label>
         <label>Port <input type="number" id="cfg-port" min="1" max="65535"></label>
         <label>Debug mode

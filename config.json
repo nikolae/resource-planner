@@ -3,5 +3,6 @@
   "port": 5000,
   "debug": true,
   "database_uri": "sqlite:///planner.db",
-  "secret_key": "change-me-in-production"
+  "secret_key": "change-me-in-production",
+  "app_name": "Resource Planner"
 }
