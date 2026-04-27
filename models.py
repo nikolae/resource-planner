@@ -4,6 +4,15 @@ from datetime import date
 db = SQLAlchemy()
 
 
+class TaskResource(db.Model):
+    __tablename__ = "task_resource"
+    task_id = db.Column(db.Integer, db.ForeignKey("task.id"), primary_key=True)
+    resource_id = db.Column(db.Integer, db.ForeignKey("resource.id"), primary_key=True)
+    allocation = db.Column(db.Integer, default=100)  # percentage 0-100
+
+    resource = db.relationship("Resource", lazy=True)
+
+
 class Project(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
@@ -25,7 +34,6 @@ class Resource(db.Model):
     name = db.Column(db.String(120), nullable=False)
     role = db.Column(db.String(120), default="")
     color = db.Column(db.String(7), default="#4a86c8")
-    tasks = db.relationship("Task", backref="resource", lazy=True)
 
     def to_dict(self):
         return {
@@ -43,13 +51,13 @@ class Task(db.Model):
     start_date = db.Column(db.Date, nullable=False, default=date.today)
     end_date = db.Column(db.Date, nullable=False, default=date.today)
     progress = db.Column(db.Integer, default=0)
-    resource_id = db.Column(db.Integer, db.ForeignKey("resource.id"), nullable=True)
     color = db.Column(db.String(7), nullable=True)
     sort_order = db.Column(db.Integer, default=0)
     parent_id = db.Column(db.Integer, db.ForeignKey("task.id"), nullable=True)
     project_id = db.Column(db.Integer, db.ForeignKey("project.id"), nullable=True)
 
     children = db.relationship("Task", backref=db.backref("parent", remote_side="Task.id"), lazy=True)
+    task_resources = db.relationship("TaskResource", backref="task", lazy=True, cascade="all, delete-orphan")
     predecessors = db.relationship(
         "Dependency", foreign_keys="Dependency.successor_id", backref="successor_task", lazy=True
     )
@@ -58,6 +66,11 @@ class Task(db.Model):
     )
 
     def to_dict(self):
+        res_list = [
+            {"id": tr.resource.id, "name": tr.resource.name, "color": tr.resource.color, "allocation": tr.allocation}
+            for tr in self.task_resources
+        ]
+        first_color = res_list[0]["color"] if res_list else "#4a86c8"
         return {
             "id": self.id,
             "name": self.name,
@@ -65,9 +78,13 @@ class Task(db.Model):
             "start_date": self.start_date.isoformat(),
             "end_date": self.end_date.isoformat(),
             "progress": self.progress,
-            "resource_id": self.resource_id,
-            "resource_name": self.resource.name if self.resource else None,
-            "color": self.color or (self.resource.color if self.resource else "#4a86c8"),
+            "resource_ids": [r["id"] for r in res_list],
+            "resources": res_list,
+            "resource_name": ", ".join(
+                f'{r["name"]} ({r["allocation"]}%)' if r["allocation"] != 100 else r["name"]
+                for r in res_list
+            ) or None,
+            "color": self.color or first_color,
             "sort_order": self.sort_order,
             "parent_id": self.parent_id,
             "project_id": self.project_id,

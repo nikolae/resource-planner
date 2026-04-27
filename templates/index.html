@@ -16,17 +16,27 @@
         </select>
         <button id="btn-add-project" class="btn btn-ghost btn-icon" title="New project">+</button>
         <button id="btn-edit-project" class="btn btn-ghost btn-icon" title="Edit project" style="display:none">&#9998;</button>
+        <button id="btn-manage-projects" class="btn btn-ghost btn-icon" title="Manage projects">&#9776;</button>
       </div>
     </div>
     <div class="header-actions">
+      <div class="view-toggle">
+        <button id="btn-view-tasks" class="btn btn-toggle active">Tasks</button>
+        <button id="btn-view-resources" class="btn btn-toggle">Resources</button>
+      </div>
       <button id="btn-add-task" class="btn btn-primary">+ Task</button>
       <button id="btn-manage-resources" class="btn btn-secondary">Resources</button>
       <button id="btn-seed" class="btn btn-ghost">Load Demo Data</button>
       <button id="btn-settings" class="btn btn-ghost btn-icon" title="Settings">&#9881;</button>
-      <div class="zoom-controls">
+      <div class="zoom-controls" title="Horizontal zoom">
         <button id="btn-zoom-out" class="btn btn-ghost btn-icon" title="Zoom out">&minus;</button>
         <span id="zoom-label">Day</span>
         <button id="btn-zoom-in" class="btn btn-ghost btn-icon" title="Zoom in">+</button>
+      </div>
+      <div class="zoom-controls" title="Vertical zoom">
+        <button id="btn-vzoom-out" class="btn btn-ghost btn-icon" title="Shorter rows">&darr;</button>
+        <span id="vzoom-label">M</span>
+        <button id="btn-vzoom-in" class="btn btn-ghost btn-icon" title="Taller rows">&uarr;</button>
       </div>
     </div>
   </header>
@@ -34,19 +44,22 @@
   <main>
     <div class="gantt-wrapper">
       <div class="gantt-sidebar" id="gantt-sidebar">
-        <div class="sidebar-header">
-          <span class="col-name">Task</span>
-          <span class="col-resource">Resource</span>
-          <span class="col-dates">Start</span>
-          <span class="col-dates">End</span>
+        <div class="sidebar-header" id="sidebar-header">
+          <span class="col-name" data-col="0">Task<span class="col-resize-handle"></span></span>
+          <span class="col-resource" data-col="1">Resource<span class="col-resize-handle"></span></span>
+          <span class="col-dates" data-col="2">Start<span class="col-resize-handle"></span></span>
+          <span class="col-dates" data-col="3">End</span>
         </div>
         <div class="sidebar-body" id="sidebar-body"></div>
       </div>
+      <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
+      <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar">&#9664;</button>
       <div class="gantt-chart-area" id="gantt-chart-area">
         <div class="chart-header" id="chart-header"></div>
         <div class="chart-body" id="chart-body">
           <canvas id="gantt-canvas"></canvas>
           <svg id="dep-svg"></svg>
+          <svg id="link-svg"></svg>
         </div>
       </div>
     </div>
@@ -65,8 +78,8 @@
           <label>End <input type="date" id="task-end" required></label>
         </div>
         <div class="form-row">
-          <label>Resource
-            <select id="task-resource"><option value="">— none —</option></select>
+          <label>Resources
+            <div class="resource-checklist" id="task-resources"></div>
           </label>
           <label>Progress (%)
             <input type="number" id="task-progress" min="0" max="100" value="0">
@@ -131,6 +144,8 @@
       </div>
       <div id="resource-list-body"></div>
       <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="btn-res-select-all">Select All</button>
+        <button type="button" class="btn btn-danger" id="btn-res-list-delete" style="display:none">Delete Selected</button>
         <button type="button" class="btn btn-ghost" id="btn-res-list-close">Close</button>
       </div>
     </div>
@@ -157,6 +172,22 @@
           <button type="submit" class="btn btn-primary">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Project list modal -->
+  <div class="modal-overlay" id="project-list-modal">
+    <div class="modal modal-wide">
+      <div class="modal-header-row">
+        <h2>Projects</h2>
+        <button type="button" class="btn btn-primary" id="btn-add-project-from-list">+ Add Project</button>
+      </div>
+      <div id="project-list-body"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" id="btn-proj-select-all">Select All</button>
+        <button type="button" class="btn btn-danger" id="btn-proj-list-delete" style="display:none">Delete Selected</button>
+        <button type="button" class="btn btn-ghost" id="btn-proj-list-close">Close</button>
+      </div>
     </div>
   </div>
 

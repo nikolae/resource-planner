@@ -1,29 +1,66 @@
 # Resource Planner
 
-A Python/Flask web application for multi-project resource planning with an interactive Gantt chart.
+A Python/Flask web application for multi-project resource planning with an interactive Gantt chart, drag-and-drop dependency linking, and utilization-based workload tracking.
 
 ## Features
 
-### Gantt Chart
+### Gantt Chart (Task View)
 - Canvas-rendered task bars with color coding
-- Five zoom levels: Day, 3-Day, Week, 2-Week, Month
+- **Horizontal zoom**: five levels — Day, 3-Day, Week, 2-Week, Month
+- **Vertical zoom**: five row sizes — XS, S, M (default), L, XL — bar height, font, and row spacing all scale together
 - Today marker (red vertical line)
 - Grid lines for time orientation
 - Horizontal scrolling with synced header and sidebar
 - Resize handles appear on bar edges when hovered, with cursor change to indicate drag affordance
 - Drag bar edges to resize (change start/end dates), drag body to move
+- **Timeline auto-expands** when dragging a bar beyond the visible date range
+- Resource dots rendered on task bars; when the sidebar is collapsed, bar labels include resource names (e.g. "Backend dev — Alice, Bob")
+
+### Drag-and-Drop Dependency Linking
+- **Connector circles** appear at the left (start) and right (end) of each task bar on hover
+- Cursor changes to **crosshair** when hovering over a connector
+- **Click and drag** from a connector to another task bar to create a dependency
+- A **dashed arrow** follows the mouse during the drag; the target bar highlights with a white border
+- **Dependency type is determined automatically** based on which connectors are used:
+  - Right → Left = Finish-to-Start (FS)
+  - Left → Left = Start-to-Start (SS)
+  - Right → Right = Finish-to-Finish (FF)
+  - Left → Right = Start-to-Finish (SF)
+- Release on empty space cancels; self-links and duplicates are rejected
+- Dependencies can also be created via right-click context menu or the dependency modal
+
+### Resource Timeline View
+- Toggle between **Tasks** and **Resources** views via buttons in the header
+- Resource view shows one row per resource with all their assigned task bars
+- Sidebar displays resource name, role, task count, and **peak utilization %**
+- **Overload detection** based on summed allocation percentages per day (not simple overlap)
+  - Two tasks at 50% each = 100% utilization = no overload
+  - Two tasks at 80% each = 160% = overloaded
+- Overloaded date ranges are highlighted with a red overlay on the chart, showing peak % labels
+- Resources exceeding 100% utilization are flagged red in the sidebar
+
+### Sidebar Panel
+- **Collapsible** — toggle button (arrow) hides/shows the sidebar; when collapsed, task bars display resource names inline
+- **Resizable width** — drag the handle between the sidebar and chart to adjust (min 120px, max 70% of window)
+- **Resizable columns** — drag column header borders to adjust individual column widths
+- Column widths reset when switching between Tasks and Resources views
 
 ### Projects
 - Create, edit, and delete projects
+- **Project list modal** — hamburger icon next to the project selector opens a list of all projects with task counts
+- **Multi-select with checkboxes** and **Select All / Deselect All** for batch deletion
 - Project selector dropdown in the header to filter the Gantt view to a single project
 - "All Projects" view to see everything at once
-- Edit button appears next to the selector when a project is active
-- Deleting a project removes all its tasks and dependencies
+- Deleting a project removes all its tasks, assignments, and dependencies
 - Demo data seeds two sample projects: "Website Redesign" and "Mobile App"
 
 ### Tasks
 - Create, edit, and delete tasks via modal dialogs
 - Fields: name, description, start date, end date, progress (%), color, project, parent task
+- **Multi-resource assignment** — assign multiple resources to a single task via checkboxes
+- **Allocation %** per resource-task assignment (1-100%), configurable in the task modal
+  - e.g., assign a PM at 10% and an engineer at 80% on the same task
+  - Allocations below 100% are shown in the sidebar: "Alice (80%), Bob (30%)"
 - Drag to move tasks on the chart
 - Drag bar edges to resize (change start/end dates)
 - Parent/child task grouping (child tasks indent in the sidebar)
@@ -33,9 +70,10 @@ A Python/Flask web application for multi-project resource planning with an inter
 ### Resources
 - "Resources" button in the header opens a list view of all resources
 - Each resource shows its color, name, and role with inline edit and delete buttons
+- **Multi-select with checkboxes** and **Select All / Deselect All** for batch deletion
 - Create new resources from the list view via "+ Add Resource"
 - Fields: name, role, color
-- Assign resources to tasks; task bars inherit the resource color unless overridden
+- Assign resources to tasks; task bars inherit the first resource's color unless overridden
 - Resources are shared across all projects
 
 ### Dependencies
@@ -46,7 +84,7 @@ A Python/Flask web application for multi-project resource planning with an inter
   - **FF** (Finish-to-Finish) — both finish together
   - **SF** (Start-to-Finish) — successor finishes when predecessor starts
 - Configurable lag (days) on each dependency
-- Add dependencies via right-click context menu on any task
+- Create dependencies by **dragging between task bar connectors**, via right-click context menu, or via the dependency modal
 - Duplicate and self-referencing dependencies are rejected
 - Dependencies are filtered with the project view
 
@@ -56,6 +94,15 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Click any swatch to select it; the active color is highlighted with a white border
 - The native color picker is still available for custom colors
 
+### UI State Persistence
+- All UI preferences are saved to browser localStorage and restored on page load:
+  - Horizontal zoom level
+  - Vertical zoom level
+  - View mode (Tasks / Resources)
+  - Selected project filter
+  - Sidebar collapsed state
+  - Sidebar width
+
 ### Settings
 - Gear icon in the header opens a settings modal
 - Editable parameters: application name, host, port, debug mode, database URI
@@ -63,7 +110,8 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Settings are persisted to `config.json`; host, port, and database URI changes require a server restart
 
 ### Demo Data
-- Click "Load Demo Data" in the header to populate two sample projects with resources, tasks, and dependencies
+- Click "Load Demo Data" in the header to populate two sample projects with resources, tasks, dependencies, and realistic allocation percentages
+- Includes examples of partial allocations (PM at 10%, engineer at 80%) and overloaded resources
 
 ## Quick Start
 
@@ -106,21 +154,46 @@ Edit this file directly, or use the settings modal in the web UI (gear icon). Ch
 ```
 resource-planner/
   app.py              Flask application and REST API routes
-  models.py           SQLAlchemy models (Project, Task, Resource, Dependency)
+  models.py           SQLAlchemy models (Project, Task, TaskResource, Resource, Dependency)
   config.json         Server and database configuration
   requirements.txt    Python dependencies
   templates/
     index.html        Single-page web UI
   static/
     css/style.css     Dark-themed styling
-    js/app.js         Gantt chart rendering, drag handling, UI logic
+    js/app.js         Gantt chart rendering, drag handling, dependency linking, UI logic
   instance/
     planner.db        SQLite database (created on first run)
+```
+
+## Data Model
+
+### Task-Resource Assignments
+
+Tasks and resources have a many-to-many relationship through the `TaskResource` join table, which includes an `allocation` percentage:
+
+```
+Task ──< TaskResource >── Resource
+           allocation (1-100%)
+```
+
+This allows a single resource to be assigned to multiple concurrent tasks at different utilization levels. The resource timeline view sums allocations per day and flags any period where a resource exceeds 100% total utilization.
+
+### Dependencies
+
+Dependencies link two tasks with a type (FS/SS/FF/SF) and optional lag in days:
+
+```
+Task (predecessor) ──> Dependency ──> Task (successor)
+                        dep_type
+                        lag (days)
 ```
 
 ## Data Storage
 
 All data is stored in a local SQLite database at `instance/planner.db`. The database and tables are created automatically on first startup. Delete this file to reset all data.
+
+UI preferences (zoom levels, sidebar state, selected project) are stored in browser localStorage and do not require the server.
 
 ## REST API
 
@@ -148,7 +221,16 @@ All endpoints accept and return JSON.
 
 **Query parameters:** `project_id` (int, optional) — filter tasks by project
 
-**Task fields:** `name` (string, required), `description` (string), `start_date` (ISO date, required), `end_date` (ISO date, required), `progress` (int 0-100), `resource_id` (int or null), `color` (hex string), `sort_order` (int), `parent_id` (int or null), `project_id` (int or null)
+**Task fields:** `name` (string, required), `description` (string), `start_date` (ISO date, required), `end_date` (ISO date, required), `progress` (int 0-100), `resource_ids` (array, see below), `color` (hex string), `sort_order` (int), `parent_id` (int or null), `project_id` (int or null)
+
+**Resource assignment format** (`resource_ids`):
+- Array of integers for 100% allocation: `[1, 2, 3]`
+- Array of objects for custom allocation: `[{"id": 1, "allocation": 80}, {"id": 2, "allocation": 30}]`
+
+**Task response** includes:
+- `resource_ids`: array of assigned resource IDs
+- `resources`: array of `{id, name, color, allocation}` objects
+- `resource_name`: formatted string, e.g. `"Alice (80%), Bob (30%)"`
 
 ### Resources
 

@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify
-from models import db, Resource, Task, Dependency, Project
+from models import db, Resource, Task, Dependency, Project, TaskResource
 from datetime import date, timedelta
 import json
 import os
@@ -89,11 +89,13 @@ def update_project(pid):
 @app.route("/api/projects/<int:pid>", methods=["DELETE"])
 def delete_project(pid):
     p = Project.query.get_or_404(pid)
-    task_ids = [t.id for t in Task.query.filter_by(project_id=pid).all()]
+    proj_tasks = Task.query.filter_by(project_id=pid).all()
+    task_ids = [t.id for t in proj_tasks]
     if task_ids:
         Dependency.query.filter(
             (Dependency.predecessor_id.in_(task_ids)) | (Dependency.successor_id.in_(task_ids))
         ).delete(synchronize_session=False)
+        TaskResource.query.filter(TaskResource.task_id.in_(task_ids)).delete(synchronize_session=False)
         Task.query.filter_by(project_id=pid).delete()
     db.session.delete(p)
     db.session.commit()
@@ -133,10 +135,24 @@ def update_resource(rid):
 
 @app.route("/api/resources/<int:rid>", methods=["DELETE"])
 def delete_resource(rid):
+    TaskResource.query.filter_by(resource_id=rid).delete()
     r = Resource.query.get_or_404(rid)
     db.session.delete(r)
     db.session.commit()
     return "", 204
+
+
+def _sync_task_resources(t, resource_entries):
+    """resource_entries: list of {id, allocation} dicts or plain int ids."""
+    TaskResource.query.filter_by(task_id=t.id).delete()
+    for entry in (resource_entries or []):
+        if isinstance(entry, dict):
+            rid = entry["id"]
+            alloc = entry.get("allocation", 100)
+        else:
+            rid = entry
+            alloc = 100
+        db.session.add(TaskResource(task_id=t.id, resource_id=rid, allocation=alloc))
 
 
 # ── Tasks ──────────────────────────────────────────────
@@ -160,13 +176,14 @@ def create_task():
         start_date=date.fromisoformat(data["start_date"]),
         end_date=date.fromisoformat(data["end_date"]),
         progress=data.get("progress", 0),
-        resource_id=data.get("resource_id"),
         color=data.get("color"),
         sort_order=data.get("sort_order", 0),
         parent_id=data.get("parent_id"),
         project_id=data.get("project_id"),
     )
     db.session.add(t)
+    db.session.flush()
+    _sync_task_resources(t, data.get("resource_ids", []))
     db.session.commit()
     return jsonify(t.to_dict()), 201
 
@@ -185,8 +202,6 @@ def update_task(tid):
         t.end_date = date.fromisoformat(data["end_date"])
     if "progress" in data:
         t.progress = data["progress"]
-    if "resource_id" in data:
-        t.resource_id = data["resource_id"]
     if "color" in data:
         t.color = data["color"]
     if "sort_order" in data:
@@ -195,6 +210,8 @@ def update_task(tid):
         t.parent_id = data["parent_id"]
     if "project_id" in data:
         t.project_id = data["project_id"]
+    if "resource_ids" in data:
+        _sync_task_resources(t, data["resource_ids"])
     db.session.commit()
     return jsonify(t.to_dict())
 
@@ -204,6 +221,7 @@ def delete_task(tid):
     Dependency.query.filter(
         (Dependency.predecessor_id == tid) | (Dependency.successor_id == tid)
     ).delete()
+    TaskResource.query.filter_by(task_id=tid).delete()
     t = Task.query.get_or_404(tid)
     db.session.delete(t)
     db.session.commit()
@@ -279,23 +297,38 @@ def seed_data():
     db.session.flush()
 
     t1 = Task(name="Requirements", start_date=today, end_date=today + timedelta(days=5),
-              resource_id=r3.id, sort_order=0, progress=100, project_id=p1.id)
+              sort_order=0, progress=100, project_id=p1.id)
     t2 = Task(name="Design", start_date=today + timedelta(days=6), end_date=today + timedelta(days=15),
-              resource_id=r2.id, sort_order=1, progress=60, project_id=p1.id)
+              sort_order=1, progress=60, project_id=p1.id)
     t3 = Task(name="Backend dev", start_date=today + timedelta(days=10), end_date=today + timedelta(days=25),
-              resource_id=r1.id, sort_order=2, progress=20, project_id=p1.id)
+              sort_order=2, progress=20, project_id=p1.id)
     t4 = Task(name="Frontend dev", start_date=today + timedelta(days=16), end_date=today + timedelta(days=30),
-              resource_id=r1.id, sort_order=3, project_id=p1.id)
+              sort_order=3, project_id=p1.id)
     t5 = Task(name="Testing", start_date=today + timedelta(days=26), end_date=today + timedelta(days=35),
-              resource_id=r3.id, sort_order=4, project_id=p1.id)
-
+              sort_order=4, project_id=p1.id)
     t6 = Task(name="App wireframes", start_date=today, end_date=today + timedelta(days=8),
-              resource_id=r2.id, sort_order=0, progress=40, project_id=p2.id)
+              sort_order=0, progress=40, project_id=p2.id)
     t7 = Task(name="API integration", start_date=today + timedelta(days=9), end_date=today + timedelta(days=20),
-              resource_id=r1.id, sort_order=1, project_id=p2.id)
+              sort_order=1, project_id=p2.id)
 
     db.session.add_all([t1, t2, t3, t4, t5, t6, t7])
     db.session.flush()
+
+    # Assignments with allocation percentages
+    assignments = [
+        (t1, r3, 10),         # Carol: PM on requirements, light touch
+        (t2, r2, 100),        # Bob: full-time design
+        (t3, r1, 80),         # Alice: mostly on backend
+        (t3, r2, 30),         # Bob: part-time design support on backend
+        (t4, r1, 100),        # Alice: full-time frontend
+        (t5, r1, 50),         # Alice: half-time testing
+        (t5, r3, 20),         # Carol: PM oversight on testing
+        (t6, r2, 100),        # Bob: full-time wireframes
+        (t7, r1, 60),         # Alice: API integration
+        (t7, r2, 40),         # Bob: API integration support
+    ]
+    for task, res, alloc in assignments:
+        db.session.add(TaskResource(task_id=task.id, resource_id=res.id, allocation=alloc))
 
     db.session.add_all([
         Dependency(predecessor_id=t1.id, successor_id=t2.id),
