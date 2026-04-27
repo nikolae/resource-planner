@@ -4,6 +4,7 @@
   const ROW_H = 36;
   const BAR_H = 22;
   const BAR_PAD = (ROW_H - BAR_H) / 2;
+  const EDGE = 8;
   const ZOOM_LEVELS = [
     { name: "Day", days: 1, colW: 36 },
     { name: "3-Day", days: 3, colW: 50 },
@@ -16,6 +17,8 @@
   let tasks = [];
   let resources = [];
   let deps = [];
+  let projects = [];
+  let currentProjectId = null;
   let timeOrigin;
   let timeCols;
 
@@ -31,13 +34,35 @@
   // ── Data fetching ─────────────────────────────────────
 
   async function loadAll() {
-    [tasks, resources, deps] = await Promise.all([
-      api("/api/tasks"),
+    const taskUrl = currentProjectId
+      ? `/api/tasks?project_id=${currentProjectId}`
+      : "/api/tasks";
+    const depUrl = currentProjectId
+      ? `/api/dependencies?project_id=${currentProjectId}`
+      : "/api/dependencies";
+    [tasks, resources, deps, projects] = await Promise.all([
+      api(taskUrl),
       api("/api/resources"),
-      api("/api/dependencies"),
+      api(depUrl),
+      api("/api/projects"),
     ]);
+    populateProjectSelect();
     computeTimeline();
     render();
+  }
+
+  function populateProjectSelect() {
+    const sel = $("#project-select");
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">All Projects</option>';
+    for (const p of projects) {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    }
+    sel.value = currentProjectId || "";
+    $("#btn-edit-project").style.display = currentProjectId ? "inline-block" : "none";
   }
 
   function computeTimeline() {
@@ -84,7 +109,7 @@
           <span class="task-dot" style="background:${t.color}"></span>
           ${esc(t.name)}
         </span>
-        <span class="col-resource">${esc(t.resource_name || "—")}</span>
+        <span class="col-resource">${esc(t.resource_name || "\u2014")}</span>
         <span class="col-dates">${fmtDate(t.start_date)}</span>
         <span class="col-dates">${fmtDate(t.end_date)}</span>`;
       row.addEventListener("click", () => openTaskModal(t));
@@ -116,7 +141,7 @@
     }
   }
 
-  function renderBars() {
+  function renderBars(hoverInfo) {
     const z = ZOOM_LEVELS[zoomIdx];
     const canvas = $("#gantt-canvas");
     const totalW = timeCols * z.colW;
@@ -205,6 +230,24 @@
         ctx.restore();
       }
 
+      // resize handles on hover
+      if (hoverInfo && hoverInfo.taskIdx === i && !dragTask) {
+        const handleW = 4;
+        const handleH = BAR_H - 6;
+        const handleY = y + 3;
+        ctx.fillStyle = "#ffffffbb";
+        if (hoverInfo.edge === "start" || hoverInfo.edge === "both") {
+          ctx.beginPath();
+          roundRect(ctx, x1 + 2, handleY, handleW, handleH, 2);
+          ctx.fill();
+        }
+        if (hoverInfo.edge === "end" || hoverInfo.edge === "both") {
+          ctx.beginPath();
+          roundRect(ctx, x1 + w - handleW - 2, handleY, handleW, handleH, 2);
+          ctx.fill();
+        }
+      }
+
       t._x1 = x1;
       t._x2 = x1 + w;
       t._y = y;
@@ -224,7 +267,6 @@
     const taskIdx = {};
     tasks.forEach((t, i) => { taskIdx[t.id] = i; });
 
-    // arrow marker
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
     defs.innerHTML = `<marker id="arrow" markerWidth="8" markerHeight="6"
       refX="8" refY="3" orient="auto">
@@ -241,25 +283,17 @@
 
       let x1, y1, x2, y2;
       if (d.dep_type === "FS") {
-        x1 = pred._x2;
-        y1 = pred._y + BAR_H / 2;
-        x2 = succ._x1;
-        y2 = succ._y + BAR_H / 2;
+        x1 = pred._x2; y1 = pred._y + BAR_H / 2;
+        x2 = succ._x1; y2 = succ._y + BAR_H / 2;
       } else if (d.dep_type === "SS") {
-        x1 = pred._x1;
-        y1 = pred._y + BAR_H / 2;
-        x2 = succ._x1;
-        y2 = succ._y + BAR_H / 2;
+        x1 = pred._x1; y1 = pred._y + BAR_H / 2;
+        x2 = succ._x1; y2 = succ._y + BAR_H / 2;
       } else if (d.dep_type === "FF") {
-        x1 = pred._x2;
-        y1 = pred._y + BAR_H / 2;
-        x2 = succ._x2;
-        y2 = succ._y + BAR_H / 2;
+        x1 = pred._x2; y1 = pred._y + BAR_H / 2;
+        x2 = succ._x2; y2 = succ._y + BAR_H / 2;
       } else {
-        x1 = pred._x1;
-        y1 = pred._y + BAR_H / 2;
-        x2 = succ._x2;
-        y2 = succ._y + BAR_H / 2;
+        x1 = pred._x1; y1 = pred._y + BAR_H / 2;
+        x2 = succ._x2; y2 = succ._y + BAR_H / 2;
       }
 
       const midX = x1 + (x2 - x1) / 2;
@@ -273,10 +307,63 @@
     }
   }
 
+  // ── Hover handling on canvas ──────────────────────────
+
+  function hitTest(mx, my) {
+    const rowIdx = Math.floor(my / ROW_H);
+    if (rowIdx < 0 || rowIdx >= tasks.length) return null;
+    const t = tasks[rowIdx];
+    if (mx < t._x1 - 2 || mx > t._x2 + 2) return null;
+    const nearStart = mx - t._x1 < EDGE;
+    const nearEnd = t._x2 - mx < EDGE;
+    let edge = null;
+    if (nearStart && nearEnd) edge = "both";
+    else if (nearStart) edge = "start";
+    else if (nearEnd) edge = "end";
+    return { taskIdx: rowIdx, edge };
+  }
+
+  function setupCanvasHover() {
+    const canvas = $("#gantt-canvas");
+    let lastHover = null;
+
+    canvas.addEventListener("mousemove", (e) => {
+      if (dragTask) return;
+      const rect = canvas.getBoundingClientRect();
+      const scrollArea = $("#chart-body");
+      const mx = e.clientX - rect.left + scrollArea.scrollLeft;
+      const my = e.clientY - rect.top + scrollArea.scrollTop;
+      const hit = hitTest(mx, my);
+
+      if (hit && hit.edge) {
+        canvas.style.cursor = "col-resize";
+      } else if (hit) {
+        canvas.style.cursor = "grab";
+      } else {
+        canvas.style.cursor = "default";
+      }
+
+      const hoverKey = hit ? `${hit.taskIdx}:${hit.edge}` : null;
+      if (hoverKey !== lastHover) {
+        lastHover = hoverKey;
+        renderBars(hit);
+        renderDeps();
+      }
+    });
+
+    canvas.addEventListener("mouseleave", () => {
+      if (dragTask) return;
+      lastHover = null;
+      canvas.style.cursor = "default";
+      renderBars(null);
+      renderDeps();
+    });
+  }
+
   // ── Drag to resize bars on canvas ─────────────────────
 
   let dragTask = null;
-  let dragMode = null; // "move", "resize-start", "resize-end"
+  let dragMode = null;
   let dragStartX = 0;
   let dragOrigStart = "";
   let dragOrigEnd = "";
@@ -299,16 +386,17 @@
       dragOrigStart = t.start_date;
       dragOrigEnd = t.end_date;
 
-      const edge = 8;
-      if (mx - t._x1 < edge) dragMode = "resize-start";
-      else if (t._x2 - mx < edge) dragMode = "resize-end";
+      if (mx - t._x1 < EDGE) dragMode = "resize-start";
+      else if (t._x2 - mx < EDGE) dragMode = "resize-end";
       else dragMode = "move";
 
+      canvas.style.cursor = dragMode === "move" ? "grabbing" : "col-resize";
       e.preventDefault();
     });
 
     window.addEventListener("mousemove", (e) => {
       if (!dragTask) return;
+      const canvas = $("#gantt-canvas");
       const rect = canvas.getBoundingClientRect();
       const scrollArea = $("#chart-body");
       const mx = e.clientX - rect.left + scrollArea.scrollLeft;
@@ -325,7 +413,7 @@
         const newStart = shiftDate(dragOrigStart, deltaDays);
         if (newStart <= dragTask.end_date) dragTask.start_date = newStart;
       }
-      renderBars();
+      renderBars(null);
       renderDeps();
     });
 
@@ -333,6 +421,7 @@
       if (!dragTask) return;
       const t = dragTask;
       dragTask = null;
+      $("#gantt-canvas").style.cursor = "default";
       if (t.start_date !== dragOrigStart || t.end_date !== dragOrigEnd) {
         await api(`/api/tasks/${t.id}`, "PUT", {
           start_date: t.start_date,
@@ -379,6 +468,17 @@
       resSel.appendChild(opt);
     }
 
+    const projSel = $("#task-project");
+    projSel.innerHTML = '<option value="">— none —</option>';
+    for (const p of projects) {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      if (t && t.project_id === p.id) opt.selected = true;
+      else if (!t && currentProjectId && p.id === currentProjectId) opt.selected = true;
+      projSel.appendChild(opt);
+    }
+
     const parentSel = $("#task-parent");
     parentSel.innerHTML = '<option value="">— none —</option>';
     for (const pt of tasks) {
@@ -401,6 +501,25 @@
     $("#res-color").value = r ? r.color : "#4a86c8";
     $("#btn-res-delete").style.display = r ? "block" : "none";
     $("#resource-modal").classList.add("open");
+  }
+
+  function openProjectModal(p) {
+    $("#project-modal-title").textContent = p ? "Edit Project" : "New Project";
+    $("#proj-id").value = p ? p.id : "";
+    $("#proj-name").value = p ? p.name : "";
+    $("#proj-desc").value = p ? p.description : "";
+    $("#proj-color").value = p ? p.color : "#4a86c8";
+    $("#btn-proj-delete").style.display = p ? "block" : "none";
+    $("#project-modal").classList.add("open");
+  }
+
+  async function openSettingsModal() {
+    const cfg = await api("/api/config");
+    $("#cfg-host").value = cfg.host;
+    $("#cfg-port").value = cfg.port;
+    $("#cfg-debug").value = String(cfg.debug);
+    $("#cfg-db-uri").value = cfg.database_uri;
+    $("#settings-modal").classList.add("open");
   }
 
   function openDepModal(taskCtx) {
@@ -451,9 +570,21 @@
     // header buttons
     $("#btn-add-task").addEventListener("click", () => openTaskModal(null));
     $("#btn-add-resource").addEventListener("click", () => openResourceModal(null));
+    $("#btn-add-project").addEventListener("click", () => openProjectModal(null));
+    $("#btn-edit-project").addEventListener("click", () => {
+      const p = projects.find((p) => p.id === currentProjectId);
+      if (p) openProjectModal(p);
+    });
+    $("#btn-settings").addEventListener("click", () => openSettingsModal());
     $("#btn-seed").addEventListener("click", async () => {
       await api("/api/seed", "POST");
       await loadAll();
+    });
+
+    // project selector
+    $("#project-select").addEventListener("change", (e) => {
+      currentProjectId = e.target.value ? parseInt(e.target.value) : null;
+      loadAll();
     });
 
     // zoom
@@ -477,6 +608,7 @@
         resource_id: $("#task-resource").value ? parseInt($("#task-resource").value) : null,
         color: $("#task-color").value,
         parent_id: $("#task-parent").value ? parseInt($("#task-parent").value) : null,
+        project_id: $("#task-project").value ? parseInt($("#task-project").value) : null,
       };
       if (id) await api(`/api/tasks/${id}`, "PUT", data);
       else await api("/api/tasks", "POST", data);
@@ -518,6 +650,49 @@
         await loadAll();
       }
     });
+
+    // project form
+    $("#project-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = $("#proj-id").value;
+      const data = {
+        name: $("#proj-name").value,
+        description: $("#proj-desc").value,
+        color: $("#proj-color").value,
+      };
+      if (id) await api(`/api/projects/${id}`, "PUT", data);
+      else {
+        const created = await api("/api/projects", "POST", data);
+        currentProjectId = created.id;
+      }
+      closeAllModals();
+      await loadAll();
+    });
+
+    $("#btn-proj-cancel").addEventListener("click", closeAllModals);
+    $("#btn-proj-delete").addEventListener("click", async () => {
+      const id = $("#proj-id").value;
+      if (id && confirm("Delete this project and all its tasks?")) {
+        await api(`/api/projects/${id}`, "DELETE");
+        if (currentProjectId === parseInt(id)) currentProjectId = null;
+        closeAllModals();
+        await loadAll();
+      }
+    });
+
+    // settings form
+    $("#settings-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await api("/api/config", "PUT", {
+        host: $("#cfg-host").value,
+        port: parseInt($("#cfg-port").value),
+        debug: $("#cfg-debug").value === "true",
+        database_uri: $("#cfg-db-uri").value,
+      });
+      closeAllModals();
+    });
+
+    $("#btn-settings-cancel").addEventListener("click", closeAllModals);
 
     // dependency form
     $("#dep-form").addEventListener("submit", async (e) => {
@@ -605,5 +780,6 @@
   setupEvents();
   setupScrollSync();
   setupCanvasDrag();
+  setupCanvasHover();
   loadAll();
 })();

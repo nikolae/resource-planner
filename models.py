@@ -4,6 +4,22 @@ from datetime import date
 db = SQLAlchemy()
 
 
+class Project(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, default="")
+    color = db.Column(db.String(7), default="#4a86c8")
+    tasks = db.relationship("Task", backref="project", lazy=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "color": self.color,
+        }
+
+
 class Resource(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
@@ -31,6 +47,7 @@ class Task(db.Model):
     color = db.Column(db.String(7), nullable=True)
     sort_order = db.Column(db.Integer, default=0)
     parent_id = db.Column(db.Integer, db.ForeignKey("task.id"), nullable=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("project.id"), nullable=True)
 
     children = db.relationship("Task", backref=db.backref("parent", remote_side="Task.id"), lazy=True)
     predecessors = db.relationship(
@@ -53,6 +70,7 @@ class Task(db.Model):
             "color": self.color or (self.resource.color if self.resource else "#4a86c8"),
             "sort_order": self.sort_order,
             "parent_id": self.parent_id,
+            "project_id": self.project_id,
         }
 
 
@@ -60,8 +78,8 @@ class Dependency(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     predecessor_id = db.Column(db.Integer, db.ForeignKey("task.id"), nullable=False)
     successor_id = db.Column(db.Integer, db.ForeignKey("task.id"), nullable=False)
-    dep_type = db.Column(db.String(2), default="FS")  # FS, SS, FF, SF
-    lag = db.Column(db.Integer, default=0)  # lag in days
+    dep_type = db.Column(db.String(2), default="FS")
+    lag = db.Column(db.Integer, default=0)
 
     __table_args__ = (
         db.UniqueConstraint("predecessor_id", "successor_id", name="uq_dependency"),

@@ -8,13 +8,23 @@
 </head>
 <body>
   <header>
-    <h1>Resource Planner</h1>
+    <div class="header-left">
+      <h1>Resource Planner</h1>
+      <div class="project-selector">
+        <select id="project-select">
+          <option value="">All Projects</option>
+        </select>
+        <button id="btn-add-project" class="btn btn-ghost btn-icon" title="New project">+</button>
+        <button id="btn-edit-project" class="btn btn-ghost btn-icon" title="Edit project" style="display:none">&#9998;</button>
+      </div>
+    </div>
     <div class="header-actions">
       <button id="btn-add-task" class="btn btn-primary">+ Task</button>
       <button id="btn-add-resource" class="btn btn-secondary">+ Resource</button>
       <button id="btn-seed" class="btn btn-ghost">Load Demo Data</button>
+      <button id="btn-settings" class="btn btn-ghost btn-icon" title="Settings">&#9881;</button>
       <div class="zoom-controls">
-        <button id="btn-zoom-out" class="btn btn-ghost btn-icon" title="Zoom out">−</button>
+        <button id="btn-zoom-out" class="btn btn-ghost btn-icon" title="Zoom out">&minus;</button>
         <span id="zoom-label">Day</span>
         <button id="btn-zoom-in" class="btn btn-ghost btn-icon" title="Zoom in">+</button>
       </div>
@@ -62,7 +72,12 @@
             <input type="number" id="task-progress" min="0" max="100" value="0">
           </label>
         </div>
-        <label>Color <input type="color" id="task-color" value="#4a86c8"></label>
+        <div class="form-row">
+          <label>Color <input type="color" id="task-color" value="#4a86c8"></label>
+          <label>Project
+            <select id="task-project"><option value="">— none —</option></select>
+          </label>
+        </div>
         <div class="form-row">
           <label>Parent task
             <select id="task-parent"><option value="">— none —</option></select>
@@ -95,6 +110,47 @@
     </div>
   </div>
 
+  <!-- Project modal -->
+  <div class="modal-overlay" id="project-modal">
+    <div class="modal">
+      <h2 id="project-modal-title">New Project</h2>
+      <form id="project-form">
+        <input type="hidden" id="proj-id">
+        <label>Name <input type="text" id="proj-name" required></label>
+        <label>Description <textarea id="proj-desc" rows="2"></textarea></label>
+        <label>Color <input type="color" id="proj-color" value="#4a86c8"></label>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="btn-proj-cancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="btn-proj-delete" style="display:none">Delete</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div class="modal-overlay" id="settings-modal">
+    <div class="modal">
+      <h2>Settings</h2>
+      <form id="settings-form">
+        <label>Host <input type="text" id="cfg-host"></label>
+        <label>Port <input type="number" id="cfg-port" min="1" max="65535"></label>
+        <label>Debug mode
+          <select id="cfg-debug">
+            <option value="true">On</option>
+            <option value="false">Off</option>
+          </select>
+        </label>
+        <label>Database URI <input type="text" id="cfg-db-uri"></label>
+        <p class="settings-note">Changes to host, port, and database URI take effect after restarting the server.</p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="btn-settings-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Dependency modal -->
   <div class="modal-overlay" id="dep-modal">
     <div class="modal">
@@ -108,10 +164,10 @@
         </label>
         <label>Type
           <select id="dep-type">
-            <option value="FS">Finish → Start</option>
-            <option value="SS">Start → Start</option>
-            <option value="FF">Finish → Finish</option>
-            <option value="SF">Start → Finish</option>
+            <option value="FS">Finish &rarr; Start</option>
+            <option value="SS">Start &rarr; Start</option>
+            <option value="FF">Finish &rarr; Finish</option>
+            <option value="SF">Start &rarr; Finish</option>
           </select>
         </label>
         <label>Lag (days) <input type="number" id="dep-lag" value="0"></label>
@@ -125,7 +181,7 @@
 
   <!-- Context menu for dependency -->
   <div class="context-menu" id="ctx-menu" style="display:none">
-    <button id="ctx-add-dep">Link dependency…</button>
+    <button id="ctx-add-dep">Link dependency&hellip;</button>
     <button id="ctx-edit-task">Edit task</button>
   </div>
 

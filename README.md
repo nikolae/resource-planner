@@ -1,6 +1,6 @@
 # Resource Planner
 
-A Python/Flask web application for project resource planning with an interactive Gantt chart.
+A Python/Flask web application for multi-project resource planning with an interactive Gantt chart.
 
 ## Features
 
@@ -10,20 +10,31 @@ A Python/Flask web application for project resource planning with an interactive
 - Today marker (red vertical line)
 - Grid lines for time orientation
 - Horizontal scrolling with synced header and sidebar
+- Resize handles appear on bar edges when hovered, with cursor change to indicate drag affordance
+- Drag bar edges to resize (change start/end dates), drag body to move
+
+### Projects
+- Create, edit, and delete projects
+- Project selector dropdown in the header to filter the Gantt view to a single project
+- "All Projects" view to see everything at once
+- Edit button appears next to the selector when a project is active
+- Deleting a project removes all its tasks and dependencies
+- Demo data seeds two sample projects: "Website Redesign" and "Mobile App"
 
 ### Tasks
 - Create, edit, and delete tasks via modal dialogs
-- Fields: name, description, start date, end date, progress (%), color
+- Fields: name, description, start date, end date, progress (%), color, project, parent task
 - Drag to move tasks on the chart
 - Drag bar edges to resize (change start/end dates)
 - Parent/child task grouping (child tasks indent in the sidebar)
 - Click a sidebar row to edit, right-click for context menu
+- New tasks default to the currently selected project
 
 ### Resources
 - Create, edit, and delete resources (people/roles)
 - Fields: name, role, color
 - Assign resources to tasks; task bars inherit the resource color unless overridden
-- Resource names shown in the sidebar alongside each task
+- Resources are shared across all projects
 
 ### Dependencies
 - Link tasks with dependency arrows (drawn as SVG curves)
@@ -35,9 +46,15 @@ A Python/Flask web application for project resource planning with an interactive
 - Configurable lag (days) on each dependency
 - Add dependencies via right-click context menu on any task
 - Duplicate and self-referencing dependencies are rejected
+- Dependencies are filtered with the project view
+
+### Settings
+- Gear icon in the header opens a settings modal
+- Editable parameters: host, port, debug mode, database URI
+- Settings are persisted to `config.json` and take effect on next server restart
 
 ### Demo Data
-- Click "Load Demo Data" in the header to populate a sample project with 3 resources, 5 tasks, and 5 dependencies
+- Click "Load Demo Data" in the header to populate two sample projects with resources, tasks, and dependencies
 
 ## Quick Start
 
@@ -49,12 +66,29 @@ python app.py
 
 Open http://localhost:5000 in your browser.
 
+## Configuration
+
+Server settings are stored in `config.json` in the project root:
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 5000,
+  "debug": true,
+  "database_uri": "sqlite:///planner.db",
+  "secret_key": "change-me-in-production"
+}
+```
+
+Edit this file directly, or use the settings modal in the web UI (gear icon). Changes to host, port, and database URI require a server restart.
+
 ## Project Structure
 
 ```
 resource-planner/
   app.py              Flask application and REST API routes
-  models.py           SQLAlchemy models (Task, Resource, Dependency)
+  models.py           SQLAlchemy models (Project, Task, Resource, Dependency)
+  config.json         Server and database configuration
   requirements.txt    Python dependencies
   templates/
     index.html        Single-page web UI
@@ -73,16 +107,29 @@ All data is stored in a local SQLite database at `instance/planner.db`. The data
 
 All endpoints accept and return JSON.
 
+### Projects
+
+| Method | Endpoint              | Description          |
+|--------|-----------------------|----------------------|
+| GET    | `/api/projects`       | List all projects    |
+| POST   | `/api/projects`       | Create a project     |
+| PUT    | `/api/projects/<id>`  | Update a project     |
+| DELETE | `/api/projects/<id>`  | Delete a project     |
+
+**Project fields:** `name` (string, required), `description` (string), `color` (hex string)
+
 ### Tasks
 
-| Method | Endpoint           | Description         |
-|--------|--------------------|---------------------|
-| GET    | `/api/tasks`       | List all tasks      |
-| POST   | `/api/tasks`       | Create a task       |
-| PUT    | `/api/tasks/<id>`  | Update a task       |
-| DELETE | `/api/tasks/<id>`  | Delete a task       |
+| Method | Endpoint           | Description                    |
+|--------|--------------------|--------------------------------|
+| GET    | `/api/tasks`       | List tasks (optionally filter) |
+| POST   | `/api/tasks`       | Create a task                  |
+| PUT    | `/api/tasks/<id>`  | Update a task                  |
+| DELETE | `/api/tasks/<id>`  | Delete a task                  |
 
-**Task fields:** `name` (string, required), `description` (string), `start_date` (ISO date, required), `end_date` (ISO date, required), `progress` (int 0-100), `resource_id` (int or null), `color` (hex string), `sort_order` (int), `parent_id` (int or null)
+**Query parameters:** `project_id` (int, optional) — filter tasks by project
+
+**Task fields:** `name` (string, required), `description` (string), `start_date` (ISO date, required), `end_date` (ISO date, required), `progress` (int 0-100), `resource_id` (int or null), `color` (hex string), `sort_order` (int), `parent_id` (int or null), `project_id` (int or null)
 
 ### Resources
 
@@ -97,13 +144,22 @@ All endpoints accept and return JSON.
 
 ### Dependencies
 
-| Method | Endpoint                  | Description            |
-|--------|---------------------------|------------------------|
-| GET    | `/api/dependencies`       | List all dependencies  |
-| POST   | `/api/dependencies`       | Create a dependency    |
-| DELETE | `/api/dependencies/<id>`  | Delete a dependency    |
+| Method | Endpoint                  | Description                          |
+|--------|---------------------------|--------------------------------------|
+| GET    | `/api/dependencies`       | List dependencies (optionally filter)|
+| POST   | `/api/dependencies`       | Create a dependency                  |
+| DELETE | `/api/dependencies/<id>`  | Delete a dependency                  |
+
+**Query parameters:** `project_id` (int, optional) — filter to dependencies within a project's tasks
 
 **Dependency fields:** `predecessor_id` (int, required), `successor_id` (int, required), `dep_type` (string: FS/SS/FF/SF, default FS), `lag` (int, days, default 0)
+
+### Configuration
+
+| Method | Endpoint       | Description                  |
+|--------|----------------|------------------------------|
+| GET    | `/api/config`  | Get current config           |
+| PUT    | `/api/config`  | Update config (saves to file)|
 
 ### Seed
 
