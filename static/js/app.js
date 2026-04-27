@@ -686,8 +686,9 @@
       const areaRect = scrollArea.getBoundingClientRect();
       const mx = e.clientX - areaRect.left + scrollArea.scrollLeft;
       const my = e.clientY - areaRect.top + scrollArea.scrollTop;
-      const connHit = connectorHitTest(mx, my);
       const hit = hitTest(mx, my);
+      hoveredTaskIdx = hit ? hit.taskIdx : -1;
+      const connHit = connectorHitTest(mx, my);
       if (connHit) canvas.style.cursor = "crosshair";
       else if (hit && hit.edge) canvas.style.cursor = "col-resize";
       else if (hit) canvas.style.cursor = "grab";
@@ -701,6 +702,7 @@
     canvas.addEventListener("mouseleave", () => {
       if (dragTask) return;
       lastHover = null;
+      hoveredTaskIdx = -1;
       canvas.style.cursor = "default";
       if (viewMode === "tasks") { renderBars(null); renderDeps(); }
     });
@@ -801,20 +803,19 @@
   let linkDrag = null; // { sourceTask, sourceEnd ("start"|"end"), targetIdx, mx, my }
   const CONNECTOR_R = 7;
 
+  let hoveredTaskIdx = -1;
+
   function connectorHitTest(mx, my) {
-    for (let i = 0; i < tasks.length; i++) {
-      const t = tasks[i];
-      const cy = t._y + BAR_H / 2;
-      // Left connector
-      const dxL = mx - t._x1, dyL = my - cy;
-      if (dxL * dxL + dyL * dyL <= CONNECTOR_R * CONNECTOR_R) {
-        return { taskIdx: i, end: "start" };
-      }
-      // Right connector
-      const dxR = mx - t._x2, dyR = my - cy;
-      if (dxR * dxR + dyR * dyR <= CONNECTOR_R * CONNECTOR_R) {
-        return { taskIdx: i, end: "end" };
-      }
+    if (hoveredTaskIdx < 0 || hoveredTaskIdx >= tasks.length) return null;
+    const t = tasks[hoveredTaskIdx];
+    const cy = t._y + BAR_H / 2;
+    const dxL = mx - t._x1, dyL = my - cy;
+    if (dxL * dxL + dyL * dyL <= CONNECTOR_R * CONNECTOR_R) {
+      return { taskIdx: hoveredTaskIdx, end: "start" };
+    }
+    const dxR = mx - t._x2, dyR = my - cy;
+    if (dxR * dxR + dyR * dyR <= CONNECTOR_R * CONNECTOR_R) {
+      return { taskIdx: hoveredTaskIdx, end: "end" };
     }
     return null;
   }
