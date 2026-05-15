@@ -547,6 +547,7 @@
   }
 
   let reorderDrag = null;
+  let resReorderDrag = null;
 
   function renderSidebar() {
     const body = $("#sidebar-body");
@@ -674,11 +675,85 @@
         <span class="col-resource" title="${esc(roleStr)}">${esc(roleStr)}</span>
         <span class="col-dates">${rv.assignments.length}</span>
         <span class="col-dates" ${overloaded ? 'style="color:var(--danger);font-weight:600"' : ""}>${peakLabel}</span>`;
-      row.addEventListener("click", () => openResourceModal(r, false));
-      row.addEventListener("mouseenter", () => setHoveredRow(idx));
-      row.addEventListener("mouseleave", () => setHoveredRow(-1));
+      row.addEventListener("click", () => { if (!resReorderDrag) openResourceModal(r, false); });
+      row.addEventListener("mouseenter", () => { if (!resReorderDrag) setHoveredRow(idx); });
+      row.addEventListener("mouseleave", () => { if (!resReorderDrag) setHoveredRow(-1); });
+      row.addEventListener("mousedown", (e) => startResReorderDrag(e, idx));
       body.appendChild(row);
     }
+  }
+
+  function startResReorderDrag(e, fromIdx) {
+    if (e.button !== 0 || viewMode !== "resources") return;
+    e.preventDefault();
+    const startY = e.clientY;
+    let active = false;
+    let toIdx = fromIdx;
+    const body = $("#sidebar-body");
+    const rows = Array.from(body.children);
+    const rowH = rows[fromIdx] ? rows[fromIdx].getBoundingClientRect().height : ROW_H;
+    let ghost = null;
+
+    const onMove = (ev) => {
+      const dy = ev.clientY - startY;
+      if (!active && Math.abs(dy) < 5) return;
+      if (!active) {
+        active = true;
+        resReorderDrag = { fromIdx };
+        rows[fromIdx].classList.add("reorder-dragging");
+        document.body.style.cursor = "grabbing";
+        document.body.style.userSelect = "none";
+        ghost = rows[fromIdx].cloneNode(true);
+        ghost.className = "sidebar-row reorder-ghost";
+        ghost.style.position = "fixed";
+        ghost.style.width = rows[fromIdx].getBoundingClientRect().width + "px";
+        ghost.style.left = rows[fromIdx].getBoundingClientRect().left + "px";
+        ghost.style.top = ev.clientY - rowH / 2 + "px";
+        ghost.style.zIndex = "1000";
+        ghost.style.pointerEvents = "none";
+        document.body.appendChild(ghost);
+      }
+      if (ghost) ghost.style.top = ev.clientY - rowH / 2 + "px";
+      // Use row midpoints for variable-height rows
+      toIdx = fromIdx;
+      for (let i = 0; i < rows.length; i++) {
+        const rRect = rows[i].getBoundingClientRect();
+        const mid = rRect.top + rRect.height / 2;
+        if (ev.clientY < mid) { toIdx = i; break; }
+        toIdx = i;
+      }
+      toIdx = Math.max(0, Math.min(resources.length - 1, toIdx));
+      rows.forEach((r, i) => {
+        r.classList.remove("reorder-above", "reorder-below");
+        if (i === toIdx && toIdx !== fromIdx) {
+          r.classList.add(toIdx < fromIdx ? "reorder-above" : "reorder-below");
+        }
+      });
+    };
+
+    const onUp = async () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      if (!active) { resReorderDrag = null; return; }
+      rows[fromIdx].classList.remove("reorder-dragging");
+      rows.forEach((r) => r.classList.remove("reorder-above", "reorder-below"));
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      if (ghost) { ghost.remove(); ghost = null; }
+      resReorderDrag = null;
+      if (toIdx !== fromIdx) {
+        const [moved] = resources.splice(fromIdx, 1);
+        resources.splice(toIdx, 0, moved);
+        const updates = resources.map((r, i) => ({ id: r.id, sort_order: i }));
+        for (const u of updates) {
+          await api(`/api/resources/${u.id}`, "PUT", { sort_order: u.sort_order });
+        }
+        await loadAll();
+      }
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   }
 
   function renderHeader() {

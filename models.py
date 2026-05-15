@@ -36,6 +36,7 @@ class Resource(db.Model):
     name = db.Column(db.String(120), nullable=False)
     role = db.Column(db.String(120), default="")
     color = db.Column(db.String(7), default="#4a86c8")
+    sort_order = db.Column(db.Integer, default=0)
 
     def to_dict(self):
         return {
@@ -43,6 +44,7 @@ class Resource(db.Model):
             "name": self.name,
             "role": self.role,
             "color": self.color,
+            "sort_order": self.sort_order,
         }
 
 

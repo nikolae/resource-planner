@@ -56,6 +56,11 @@ with app.app_context():
             elif "role" not in cols:
                 db.session.execute(text("ALTER TABLE task_resource ADD COLUMN role VARCHAR(120)"))
                 db.session.commit()
+        if "resource" in insp.get_table_names():
+            res_cols = [c["name"] for c in insp.get_columns("resource")]
+            if "sort_order" not in res_cols:
+                db.session.execute(text("ALTER TABLE resource ADD COLUMN sort_order INTEGER DEFAULT 0"))
+                db.session.commit()
     except Exception:
         db.session.rollback()
     db.create_all()
@@ -135,7 +140,7 @@ def delete_project(pid):
 
 @app.route("/api/resources", methods=["GET"])
 def get_resources():
-    return jsonify([r.to_dict() for r in Resource.query.order_by(Resource.name).all()])
+    return jsonify([r.to_dict() for r in Resource.query.order_by(Resource.sort_order, Resource.name).all()])
 
 
 @app.route("/api/resources", methods=["POST"])
@@ -145,6 +150,7 @@ def create_resource():
         name=data["name"],
         role=data.get("role", ""),
         color=data.get("color", "#4a86c8"),
+        sort_order=data.get("sort_order", 0),
     )
     db.session.add(r)
     db.session.commit()
@@ -158,6 +164,8 @@ def update_resource(rid):
     r.name = data.get("name", r.name)
     r.role = data.get("role", r.role)
     r.color = data.get("color", r.color)
+    if "sort_order" in data:
+        r.sort_order = data["sort_order"]
     db.session.commit()
     return jsonify(r.to_dict())
 
@@ -340,7 +348,7 @@ def export_project(pid):
     export_data = {
         "version": 1,
         "project": {"name": p.name, "description": p.description, "color": p.color},
-        "resources": [{"name": r.name, "role": r.role, "color": r.color} for r in resources_list],
+        "resources": [{"name": r.name, "role": r.role, "color": r.color, "sort_order": r.sort_order} for r in resources_list],
         "tasks": [
             {
                 "name": t.name,
@@ -395,7 +403,7 @@ def import_project():
         if existing:
             res_idx_to_id[i] = existing.id
         else:
-            r = Resource(name=rd["name"], role=rd.get("role", ""), color=rd.get("color", "#4a86c8"))
+            r = Resource(name=rd["name"], role=rd.get("role", ""), color=rd.get("color", "#4a86c8"), sort_order=rd.get("sort_order", i))
             db.session.add(r)
             db.session.flush()
             res_idx_to_id[i] = r.id
