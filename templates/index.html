@@ -26,7 +26,7 @@
       </div>
       <button id="btn-add-task" class="btn btn-primary">+ Task</button>
       <button id="btn-manage-resources" class="btn btn-secondary">Resources</button>
-      <button id="btn-export-png" class="btn btn-secondary">Export PNG</button>
+      <button id="btn-export" class="btn btn-secondary">Export</button>
       <button id="btn-themes" class="btn btn-ghost btn-icon" title="Themes">&#127912;</button>
       <button id="btn-help" class="btn btn-ghost btn-icon" title="Help">?</button>
       <button id="btn-settings" class="btn btn-ghost btn-icon" title="Settings">&#9881;</button>
@@ -212,10 +212,15 @@
         </label>
         <label>Database URI <input type="text" id="cfg-db-uri"></label>
         <p class="settings-note">Changes to host, port, and database URI take effect after restarting the server.</p>
-        <div class="form-actions">
-          <button type="button" class="btn btn-ghost" id="btn-seed">Load Demo Data</button>
-          <button type="button" class="btn btn-ghost" id="btn-settings-cancel">Cancel</button>
-          <button type="submit" class="btn btn-primary">Save</button>
+        <div class="form-actions" style="justify-content:space-between">
+          <div style="display:flex;gap:8px">
+            <button type="button" class="btn btn-ghost" id="btn-seed">Load Demo Data</button>
+            <button type="button" class="btn btn-danger" id="btn-reset-all">Reset All Data</button>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button type="button" class="btn btn-ghost" id="btn-settings-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
         </div>
       </form>
     </div>
@@ -229,7 +234,12 @@
         <button type="button" class="btn btn-primary" id="btn-add-theme">+ New Theme</button>
       </div>
       <div id="theme-list-body"></div>
-      <div class="form-actions">
+      <div class="form-actions" style="justify-content:space-between">
+        <div style="display:flex;gap:8px">
+          <button type="button" class="btn btn-secondary" id="btn-export-themes">Export Themes</button>
+          <button type="button" class="btn btn-secondary" id="btn-import-themes">Import Themes</button>
+          <input type="file" id="theme-import-file" accept=".json" style="display:none">
+        </div>
         <button type="button" class="btn btn-ghost" id="btn-theme-list-close">Close</button>
       </div>
     </div>
@@ -268,6 +278,25 @@
     </div>
   </div>
 
+  <!-- Export modal -->
+  <div class="modal-overlay" id="export-modal">
+    <div class="modal">
+      <h2>Export View</h2>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Download the current Gantt chart view. Exported at 2&times; resolution for sharp text.</p>
+      <label style="font-size:12px;display:flex;align-items:center;gap:8px;margin-bottom:16px;cursor:pointer">
+        <input type="checkbox" id="export-inline-resources" style="width:auto;margin:0;accent-color:var(--accent)">
+        Show resource names on bars (useful when sidebar is hidden)
+      </label>
+      <div class="form-actions" style="justify-content:center;gap:12px">
+        <button type="button" class="btn btn-primary" id="btn-export-png">PNG</button>
+        <button type="button" class="btn btn-primary" id="btn-export-pdf">PDF</button>
+      </div>
+      <div class="form-actions" style="margin-top:12px">
+        <button type="button" class="btn btn-ghost" id="btn-export-close">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Help modal -->
   <div class="modal-overlay" id="help-modal">
     <div class="modal modal-wide" style="max-height:85vh">
@@ -294,20 +323,30 @@
         <div class="help-section">
           <h3>Resources</h3>
           <p>Click <strong>Resources</strong> to manage the resource list. Assign multiple resources per task with <strong>allocation percentages</strong> (e.g., a PM at 10%, an engineer at 80%).</p>
-          <p>Switch to <strong>Resources view</strong> to see one row per resource with all their tasks. Red overlays flag periods where a resource exceeds 100% utilization.</p>
+          <p>The same resource can be assigned to a task <strong>multiple times with different roles</strong> (e.g., Alice as both PM and IC on the same task).</p>
+          <p>Switch to <strong>Resources view</strong> to see one row per resource with all their assignments. Overlapping assignments are <strong>stacked into lanes</strong> so bars don't overlap. Bar labels show the role (e.g., "Task [PM]"). Red overlays flag periods where a resource exceeds 100% utilization.</p>
+          <p><strong>Click a resource row</strong> in the sidebar to edit it directly.</p>
         </div>
         <div class="help-section">
           <h3>Sidebar</h3>
-          <p>The sidebar is <strong>collapsible</strong> (arrow toggle) and <strong>resizable</strong> (drag the border). Column widths are also adjustable by dragging header borders. When collapsed, task bars show resource names inline.</p>
+          <p>The sidebar is <strong>collapsible</strong> (arrow toggle) and <strong>resizable</strong> (drag the border). Column widths are also adjustable by dragging header borders&mdash;the last column always fills remaining space.</p>
+          <p><strong>Row highlighting</strong>: hovering a row highlights it across both the sidebar and chart for easy visual tracking.</p>
         </div>
         <div class="help-section">
           <h3>Themes &amp; Export</h3>
           <p>Click the <strong>palette icon</strong> to browse, create, edit, or duplicate themes with full color customization.</p>
+          <p>Use <strong>Export Themes</strong> / <strong>Import Themes</strong> in the theme manager to share custom themes between browsers or team members.</p>
           <p>Click <strong>Export PNG</strong> to download the current view as an image for Confluence, slides, or email.</p>
+        </div>
+        <div class="help-section">
+          <h3>Undo / Redo</h3>
+          <p>Most actions in the task view can be undone and redone. This includes dragging, editing, creating, and deleting tasks and dependencies.</p>
         </div>
         <div class="help-section">
           <h3>Keyboard Shortcuts</h3>
           <table class="help-keys">
+            <tr><td><kbd>Ctrl+Z</kbd></td><td>Undo last action</td></tr>
+            <tr><td><kbd>Ctrl+Y</kbd> / <kbd>Ctrl+Shift+Z</kbd></td><td>Redo</td></tr>
             <tr><td><kbd>Esc</kbd></td><td>Close the current modal</td></tr>
           </table>
         </div>

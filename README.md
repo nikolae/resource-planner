@@ -32,7 +32,7 @@ A Python/Flask web application for multi-project resource planning with an inter
 ### Resource Timeline View
 - Toggle between **Tasks** and **Resources** views via buttons in the header
 - Resource view shows one row per resource with all their assigned task bars
-- **Per-assignment bars** — if a resource has multiple roles on the same task (e.g., PM and IC), each assignment renders as a separate bar with the role in the label (e.g., "Task Name [PM]")
+- **Per-assignment bars** — if a resource has multiple roles on the same task (e.g., PM and IC), each assignment renders as a separate bar with role and allocation in the label (e.g., "Task Name (PM | 10%)")
 - **Lane stacking** — overlapping assignments are stacked vertically into lanes within the row; row height expands dynamically to fit all lanes at a legible size
 - Sidebar displays resource name, **all unique assigned roles** (not just the default), assignment count, and **peak utilization %**
 - **Click a resource row** in the sidebar to open the edit resource modal directly
@@ -69,6 +69,7 @@ A Python/Flask web application for multi-project resource planning with an inter
   - Allocations below 100% are shown in the sidebar: "Alice (80%), Bob (30%)"
 - Drag to move tasks on the chart
 - Drag bar edges to resize (change start/end dates)
+- **Drag to reorder** — drag sidebar rows vertically to reorder tasks; ghost row and drop indicator show the target position
 - Parent/child task grouping (child tasks indent in the sidebar)
 - Click a sidebar row to edit, right-click for context menu
 - New tasks default to the currently selected project
@@ -93,7 +94,12 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Create dependencies by **dragging between task bar connectors**, via right-click context menu, or via the dependency modal
 - Duplicate and self-referencing dependencies are rejected
 - **Click any dependency arrow** to highlight it (turns red); click to delete with confirmation
-- **Schedule enforcement** — when a dependency is created, the successor task automatically shifts forward to satisfy the constraint while preserving its duration
+- **Schedule enforcement** — dependencies are enforced on creation and on drag:
+  - When a dependency is created, the successor shifts forward to satisfy the constraint
+  - When a predecessor is moved or resized, successors shift to maintain the constraint
+  - Moving/shrinking a predecessor pulls successors back proportionally while preserving intentional gaps
+  - Enforcement cascades through the entire dependency chain
+- **Date validation** — end date cannot be before start date (enforced in UI and API)
 - Dependencies are filtered with the project view
 
 ### Color Picker
@@ -102,18 +108,23 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Click any swatch to select it; the active color is highlighted with a white border
 - The native color picker is still available for custom colors
 
-### Export PNG
-- Click "Export PNG" in the header to download the current Gantt view as a PNG image
+### Export (PNG / PDF)
+- Click **Export** in the header to open the export modal with PNG and PDF options
 - Composites sidebar (columns, header, rows), date header, task bars, dependency arrows, and overlays into a single image
+- **2x resolution rendering** — all text, bars, and lines are re-rendered at high DPI for crisp output
+- Sidebar columns are widened in export (min 120px task, 160px resource) to prevent truncation
+- **"Show resource names on bars"** checkbox — overlays resource names on bars even when the sidebar is visible
 - Chart is clipped to the last task bar plus a small margin — no wasted empty space on the right
-- Works in both Tasks and Resources views, and respects sidebar collapsed/expanded state
+- PDF pages are sized to content (no scaling down to fit A4), so text is readable at 100% zoom
+- Works in both Tasks and Resources views
 - Useful for embedding in Confluence pages, slide decks, or sharing via email
 
 ### Themes
-- Three built-in themes:
+- Four built-in themes:
   - **Midnight** — deep navy blue (default, original theme)
   - **Dark** — neutral dark gray, VS Code-inspired
   - **Light** — clean white/light gray for bright environments
+  - **Warm Light** — cream/warm tones with orange accent
 - **Theme manager** (palette icon in header) — browse all themes, see color previews, apply with one click
 - **Create custom themes** — name your theme and pick colors for all 8 CSS variables (background, surface, surface2, border, text, text dim, accent, danger)
 - **Edit and delete** custom themes; built-in themes can be duplicated as a starting point
@@ -122,6 +133,14 @@ A Python/Flask web application for multi-project resource planning with an inter
 - All UI elements adapt: sidebar, modals, chart grid, dependency arrows, today marker, connectors, overload highlights, scrollbars
 - Canvas-drawn elements (bar labels, resize handles, connector circles) also adapt to the current theme
 - Theme choice and custom themes are persisted to localStorage
+- **Export / Import themes** — share custom themes between browsers or team members via JSON files from the theme manager
+
+### Undo / Redo
+- **Ctrl+Z** to undo, **Ctrl+Y** or **Ctrl+Shift+Z** to redo (Cmd on Mac)
+- Supports: drag move/resize, task edit, task create, task delete, dependency create, dependency delete, task reorder
+- Undo restores previous state via API calls; redo re-applies the action
+- Undo stack holds up to 50 actions; redo stack clears on any new action
+- Dependency undo also reverses any schedule shift that was applied to the successor task
 
 ### UI State Persistence
 - All UI preferences are saved to browser localStorage and restored on page load:
@@ -138,6 +157,7 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Editable parameters: application name, host, port, debug mode, database URI
 - The application name controls the header title and browser tab title, and takes effect immediately
 - **Load Demo Data** button is available in the settings modal to populate sample projects
+- **Reset All Data** — clears all projects, tasks, resources, and dependencies with double confirmation
 - Settings are persisted to `config.json`; host, port, and database URI changes require a server restart
 
 ### Demo Data

@@ -56,6 +56,12 @@
               "--border": "#d0d0d0", "--text": "#1e1e1e", "--text-dim": "#666666",
               "--accent": "#2563eb", "--danger": "#dc2626" },
     },
+    warm: {
+      name: "Warm Light", builtin: true,
+      vars: { "--bg": "#faf8f5", "--surface": "#ffffff", "--surface2": "#f0ebe4",
+              "--border": "#d9cfc2", "--text": "#2c2418", "--text-dim": "#7a6e60",
+              "--accent": "#c06020", "--danger": "#c0392b" },
+    },
   };
   const THEME_STORAGE_KEY = "rp_custom_themes";
   let customThemes = loadCustomThemes();
@@ -121,6 +127,174 @@
     if (r.status === 204) return null;
     return r.json();
   };
+
+  // ── Undo stack ──────────────────────────────────────────
+  const undoStack = [];
+  const redoStack = [];
+  const MAX_UNDO = 50;
+
+  function pushUndo(action) {
+    undoStack.push(action);
+    if (undoStack.length > MAX_UNDO) undoStack.shift();
+    redoStack.length = 0;
+  }
+
+  async function undo() {
+    const action = undoStack.pop();
+    if (!action) return;
+    switch (action.type) {
+      case "task-update": {
+        const cur = tasks.find((x) => x.id === action.id);
+        const curState = cur ? {
+          name: cur.name, description: cur.description,
+          start_date: cur.start_date, end_date: cur.end_date,
+          progress: cur.progress, color: cur.color,
+          resource_ids: cur.resources.map((r) => ({ id: r.id, allocation: r.allocation, role: r.role || undefined })),
+          parent_id: cur.parent_id, project_id: cur.project_id,
+        } : null;
+        await api(`/api/tasks/${action.id}`, "PUT", action.before);
+        redoStack.push({ type: "task-update", id: action.id, before: curState });
+        break;
+      }
+      case "task-create": {
+        const cur = tasks.find((x) => x.id === action.id);
+        const curData = cur ? {
+          name: cur.name, description: cur.description,
+          start_date: cur.start_date, end_date: cur.end_date,
+          progress: cur.progress, color: cur.color,
+          resource_ids: cur.resources.map((r) => ({ id: r.id, allocation: r.allocation, role: r.role || undefined })),
+          parent_id: cur.parent_id, project_id: cur.project_id,
+          sort_order: cur.sort_order,
+        } : null;
+        await api(`/api/tasks/${action.id}`, "DELETE");
+        redoStack.push({ type: "task-delete-redo", data: curData });
+        break;
+      }
+      case "task-delete": {
+        const t = await api("/api/tasks", "POST", action.data);
+        const newDeps = [];
+        for (const d of (action.deps || [])) {
+          const depData = { ...d };
+          if (depData.predecessor_id === action.oldId) depData.predecessor_id = t.id;
+          if (depData.successor_id === action.oldId) depData.successor_id = t.id;
+          const created = await api("/api/dependencies", "POST", depData);
+          if (created && created.id) newDeps.push(created.id);
+        }
+        redoStack.push({ type: "task-create-redo", id: t.id, depIds: newDeps });
+        break;
+      }
+      case "dep-create": {
+        const dep = deps.find((d) => d.id === action.id);
+        const depData = dep ? { predecessor_id: dep.predecessor_id, successor_id: dep.successor_id, dep_type: dep.dep_type, lag: dep.lag } : null;
+        await api(`/api/dependencies/${action.id}`, "DELETE");
+        redoStack.push({ type: "dep-delete-redo", data: depData });
+        break;
+      }
+      case "dep-delete": {
+        const result = await api("/api/dependencies", "POST", action.data);
+        redoStack.push({ type: "dep-create-redo", id: result.id });
+        break;
+      }
+      case "dep-create-shift": {
+        const dep = deps.find((d) => d.id === action.depId);
+        const depData = dep ? { predecessor_id: dep.predecessor_id, successor_id: dep.successor_id, dep_type: dep.dep_type, lag: dep.lag } : null;
+        const cur = tasks.find((x) => x.id === action.taskId);
+        const curDates = cur ? { start_date: cur.start_date, end_date: cur.end_date } : null;
+        await api(`/api/dependencies/${action.depId}`, "DELETE");
+        if (action.taskBefore) {
+          await api(`/api/tasks/${action.taskId}`, "PUT", action.taskBefore);
+        }
+        redoStack.push({ type: "dep-create-shift-redo", depData, taskId: action.taskId, taskAfter: curDates });
+        break;
+      }
+      case "reorder": {
+        const curOrder = tasks.map((t) => t.id);
+        for (let i = 0; i < action.oldOrder.length; i++) {
+          await api(`/api/tasks/${action.oldOrder[i]}`, "PUT", { sort_order: i });
+        }
+        redoStack.push({ type: "reorder", oldOrder: curOrder });
+        break;
+      }
+    }
+    await loadAll();
+  }
+
+  async function redo() {
+    const action = redoStack.pop();
+    if (!action) return;
+    switch (action.type) {
+      case "task-update": {
+        const cur = tasks.find((x) => x.id === action.id);
+        const curState = cur ? {
+          name: cur.name, description: cur.description,
+          start_date: cur.start_date, end_date: cur.end_date,
+          progress: cur.progress, color: cur.color,
+          resource_ids: cur.resources.map((r) => ({ id: r.id, allocation: r.allocation, role: r.role || undefined })),
+          parent_id: cur.parent_id, project_id: cur.project_id,
+        } : null;
+        await api(`/api/tasks/${action.id}`, "PUT", action.before);
+        undoStack.push({ type: "task-update", id: action.id, before: curState });
+        break;
+      }
+      case "task-delete-redo": {
+        if (action.data) {
+          const t = await api("/api/tasks", "POST", action.data);
+          undoStack.push({ type: "task-create", id: t.id });
+        }
+        break;
+      }
+      case "task-create-redo": {
+        const cur = tasks.find((x) => x.id === action.id);
+        const curData = cur ? {
+          name: cur.name, description: cur.description,
+          start_date: cur.start_date, end_date: cur.end_date,
+          progress: cur.progress, color: cur.color,
+          resource_ids: cur.resources.map((r) => ({ id: r.id, allocation: r.allocation, role: r.role || undefined })),
+          parent_id: cur.parent_id, project_id: cur.project_id,
+          sort_order: cur.sort_order,
+        } : null;
+        for (const depId of (action.depIds || [])) {
+          await api(`/api/dependencies/${depId}`, "DELETE");
+        }
+        await api(`/api/tasks/${action.id}`, "DELETE");
+        undoStack.push({ type: "task-delete", oldId: action.id, data: curData, deps: [] });
+        break;
+      }
+      case "dep-delete-redo": {
+        if (action.data) {
+          const result = await api("/api/dependencies", "POST", action.data);
+          undoStack.push({ type: "dep-create", id: result.id });
+        }
+        break;
+      }
+      case "dep-create-redo": {
+        const dep = deps.find((d) => d.id === action.id);
+        const depData = dep ? { predecessor_id: dep.predecessor_id, successor_id: dep.successor_id, dep_type: dep.dep_type, lag: dep.lag } : null;
+        await api(`/api/dependencies/${action.id}`, "DELETE");
+        undoStack.push({ type: "dep-delete", data: depData });
+        break;
+      }
+      case "dep-create-shift-redo": {
+        if (action.depData) {
+          const result = await api("/api/dependencies", "POST", action.depData);
+          if (action.taskAfter) {
+            await api(`/api/tasks/${action.taskId}`, "PUT", action.taskAfter);
+          }
+          undoStack.push({ type: "dep-create-shift", depId: result.id, taskId: action.taskId, taskBefore: action.taskAfter ? { start_date: tasks.find((x) => x.id === action.taskId)?.start_date, end_date: tasks.find((x) => x.id === action.taskId)?.end_date } : null });
+        }
+        break;
+      }
+      case "reorder": {
+        const curOrder = tasks.map((t) => t.id);
+        for (let i = 0; i < action.oldOrder.length; i++) {
+          await api(`/api/tasks/${action.oldOrder[i]}`, "PUT", { sort_order: i });
+        }
+        undoStack.push({ type: "reorder", oldOrder: curOrder });
+        break;
+      }
+    }
+    await loadAll();
+  }
 
   // ── Recent colors (localStorage) ─────────────────────
 
@@ -372,6 +546,8 @@
     drawRowHighlight();
   }
 
+  let reorderDrag = null;
+
   function renderSidebar() {
     const body = $("#sidebar-body");
     body.innerHTML = "";
@@ -394,12 +570,82 @@
         <span class="col-dates">${fmtDate(t.start_date)}</span>
         <span class="col-dates">${fmtDate(t.end_date)}</span>
         <span class="col-resource" title="${esc(names)}">${esc(names)}</span>`;
-      row.addEventListener("click", () => openTaskModal(t));
+      row.addEventListener("click", (e) => { if (!reorderDrag) openTaskModal(t); });
       row.addEventListener("contextmenu", (e) => showCtxMenu(e, t));
-      row.addEventListener("mouseenter", () => setHoveredRow(idx));
-      row.addEventListener("mouseleave", () => setHoveredRow(-1));
+      row.addEventListener("mouseenter", () => { if (!reorderDrag) setHoveredRow(idx); });
+      row.addEventListener("mouseleave", () => { if (!reorderDrag) setHoveredRow(-1); });
+      row.addEventListener("mousedown", (e) => startReorderDrag(e, idx));
       body.appendChild(row);
     }
+  }
+
+  function startReorderDrag(e, fromIdx) {
+    if (e.button !== 0 || viewMode !== "tasks") return;
+    e.preventDefault();
+    const startY = e.clientY;
+    let active = false;
+    let toIdx = fromIdx;
+    const body = $("#sidebar-body");
+    const rows = Array.from(body.children);
+    const rowH = rows[0] ? rows[0].getBoundingClientRect().height : ROW_H;
+    let ghost = null;
+
+    const onMove = (ev) => {
+      const dy = ev.clientY - startY;
+      if (!active && Math.abs(dy) < 5) return;
+      if (!active) {
+        active = true;
+        reorderDrag = { fromIdx };
+        rows[fromIdx].classList.add("reorder-dragging");
+        document.body.style.cursor = "grabbing";
+        document.body.style.userSelect = "none";
+        // Create floating ghost
+        ghost = rows[fromIdx].cloneNode(true);
+        ghost.className = "sidebar-row reorder-ghost";
+        ghost.style.position = "fixed";
+        ghost.style.width = rows[fromIdx].getBoundingClientRect().width + "px";
+        ghost.style.left = rows[fromIdx].getBoundingClientRect().left + "px";
+        ghost.style.top = ev.clientY - rowH / 2 + "px";
+        ghost.style.zIndex = "1000";
+        ghost.style.pointerEvents = "none";
+        document.body.appendChild(ghost);
+      }
+      if (ghost) ghost.style.top = ev.clientY - rowH / 2 + "px";
+      const offset = Math.round(dy / rowH);
+      toIdx = Math.max(0, Math.min(tasks.length - 1, fromIdx + offset));
+      rows.forEach((r, i) => {
+        r.classList.remove("reorder-above", "reorder-below");
+        if (i === toIdx && toIdx !== fromIdx) {
+          r.classList.add(toIdx < fromIdx ? "reorder-above" : "reorder-below");
+        }
+      });
+    };
+
+    const onUp = async () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      if (!active) { reorderDrag = null; return; }
+      rows[fromIdx].classList.remove("reorder-dragging");
+      rows.forEach((r) => r.classList.remove("reorder-above", "reorder-below"));
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      if (ghost) { ghost.remove(); ghost = null; }
+      reorderDrag = null;
+      if (toIdx !== fromIdx) {
+        const oldOrder = tasks.map((t) => t.id);
+        const [moved] = tasks.splice(fromIdx, 1);
+        tasks.splice(toIdx, 0, moved);
+        const updates = tasks.map((t, i) => ({ id: t.id, sort_order: i }));
+        for (const u of updates) {
+          await api(`/api/tasks/${u.id}`, "PUT", { sort_order: u.sort_order });
+        }
+        pushUndo({ type: "reorder", oldOrder });
+        await loadAll();
+      }
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   }
 
   function renderResourceSidebar() {
@@ -609,7 +855,8 @@
         const w = Math.max(x2 - x1, 8);
         const barH = laneH - gap;
         const y = rowY + BAR_PAD + rv._lanes[i] * laneH;
-        const label = a.role ? `${t.name} [${a.role}]` : t.name;
+        const meta = a.role && a.allocation !== 100 ? ` (${a.role} | ${a.allocation}%)` : a.role ? ` (${a.role})` : a.allocation !== 100 ? ` (${a.allocation}%)` : "";
+        const label = t.name + meta;
         drawBar(ctx, x1, y, w, t.color, t.progress, label, barH);
       }
     }
@@ -810,7 +1057,9 @@
         const depId = hitPath.dataset.depId;
         const label = `${hitPath.dataset.predName} → ${hitPath.dataset.succName} (${hitPath.dataset.depType})`;
         if (confirm(`Delete dependency?\n${label}`)) {
+          const dep = deps.find((d) => d.id === parseInt(depId));
           await api(`/api/dependencies/${depId}`, "DELETE");
+          if (dep) pushUndo({ type: "dep-delete", data: { predecessor_id: dep.predecessor_id, successor_id: dep.successor_id, dep_type: dep.dep_type, lag: dep.lag } });
           await loadAll();
         }
       });
@@ -957,7 +1206,18 @@
       const t = dragTask; dragTask = null;
       $("#gantt-canvas").style.cursor = "default";
       if (t.start_date !== dragOrigStart || t.end_date !== dragOrigEnd) {
+        pushUndo({ type: "task-update", id: t.id, before: { start_date: dragOrigStart, end_date: dragOrigEnd } });
         await api(`/api/tasks/${t.id}`, "PUT", { start_date: t.start_date, end_date: t.end_date });
+        // Calculate how much the relevant edge moved (for pull-back limiting)
+        const origEnd = parseLocal(dragOrigEnd).getTime();
+        const newEnd = parseLocal(t.end_date).getTime();
+        const origStart = parseLocal(dragOrigStart).getTime();
+        const newStart = parseLocal(t.start_date).getTime();
+        const endDelta = Math.round((newEnd - origEnd) / 86400000);
+        const startDelta = Math.round((newStart - origStart) / 86400000);
+        // Use the minimum movement as the pull-back limit
+        const predDelta = Math.min(endDelta, startDelta);
+        await enforceDepsFrom(t, predDelta);
         await loadAll();
       }
     });
@@ -965,7 +1225,7 @@
 
   // ── Dependency schedule enforcement ────────────────────
 
-  function depScheduleShift(pred, succ, depType, lag) {
+  function depScheduleShift(pred, succ, depType, lag, allowPullBack) {
     const predStart = parseLocal(pred.start_date);
     const predEnd = parseLocal(pred.end_date);
     const succStart = parseLocal(succ.start_date);
@@ -988,8 +1248,40 @@
     }
 
     const diffMs = requiredStart.getTime() - succStart.getTime();
-    if (diffMs <= 0) return 0;
-    return Math.round(diffMs / 86400000);
+    if (!allowPullBack && diffMs <= 0) return 0;
+    const days = Math.round(diffMs / 86400000);
+    return days;
+  }
+
+  async function enforceDepsFrom(movedTask, predDelta) {
+    const depUrl = currentProjectId ? `/api/dependencies?project_id=${currentProjectId}` : "/api/dependencies";
+    const taskUrl = currentProjectId ? `/api/tasks?project_id=${currentProjectId}` : "/api/tasks";
+    deps = await api(depUrl);
+    tasks = await api(taskUrl);
+    const pred = tasks.find((t) => t.id === movedTask.id) || movedTask;
+    const outDeps = deps.filter((d) => d.predecessor_id === pred.id);
+    for (const d of outDeps) {
+      const succ = tasks.find((t) => t.id === d.successor_id);
+      if (!succ) continue;
+      const shift = depScheduleShift(pred, succ, d.dep_type, d.lag, true);
+      let actualShift;
+      if (shift > 0) {
+        // Violation: successor must push forward
+        actualShift = shift;
+      } else if (shift < 0 && predDelta !== undefined && predDelta < 0) {
+        // Predecessor moved/shrunk left — pull successor back, but only by the predecessor's movement
+        // Don't pull more than what would close a gap (preserve intentional spacing)
+        actualShift = Math.max(shift, predDelta);
+      } else {
+        actualShift = 0;
+      }
+      if (actualShift !== 0) {
+        succ.start_date = shiftDate(succ.start_date, actualShift);
+        succ.end_date = shiftDate(succ.end_date, actualShift);
+        await api(`/api/tasks/${succ.id}`, "PUT", { start_date: succ.start_date, end_date: succ.end_date });
+        await enforceDepsFrom(succ, actualShift);
+      }
+    }
   }
 
   // ── Link drag (dependency creation by dragging) ──────
@@ -1121,6 +1413,7 @@
       else if (sourceEnd === "end" && targetEnd === "end") depType = "FF";
       else depType = "SF";
 
+      const taskBefore = { start_date: tgt.start_date, end_date: tgt.end_date };
       const result = await api("/api/dependencies", "POST", {
         predecessor_id: src.id,
         successor_id: tgt.id,
@@ -1138,6 +1431,9 @@
           start_date: shiftDate(tgt.start_date, shift),
           end_date: shiftDate(tgt.end_date, shift),
         });
+        pushUndo({ type: "dep-create-shift", depId: result.id, taskId: tgt.id, taskBefore });
+      } else {
+        pushUndo({ type: "dep-create", id: result.id });
       }
       await loadAll();
     });
@@ -1618,26 +1914,32 @@
 
   // ── Export PNG ─────────────────────────────────────────
 
-  function exportPNG() {
+  function buildExportCanvas(showSidebarOverride, callback) {
+    if (typeof showSidebarOverride === "function") { callback = showSidebarOverride; showSidebarOverride = !sidebarCollapsed; }
+    const DPR = 2;
     const canvas = $("#gantt-canvas");
     const depSvg = $("#dep-svg");
-    const chartHeader = $("#chart-header");
     const sidebar = $("#gantt-sidebar");
     const sidebarBody = $("#sidebar-body");
     const z = ZOOM_LEVELS[zoomIdx];
 
-    const sidebarVisible = !sidebarCollapsed;
+    const sidebarVisible = showSidebarOverride;
     const headerH = 48;
 
-    // Compute sidebar column widths from the actual rendered header spans
+    // Measure sidebar columns, ensuring minimum widths for readability
     const hdrSpans = Array.from(sidebar.querySelector(".sidebar-header").children);
-    const exportColWidths = hdrSpans.map((s) => s.getBoundingClientRect().width);
+    const exportColWidths = hdrSpans.map((s) => {
+      const rendered = s.getBoundingClientRect().width;
+      return Math.max(rendered, 80);
+    });
+    // Give resource/name columns extra space in export
+    const lastColIdx = exportColWidths.length - 1;
+    if (exportColWidths[lastColIdx] < 160) exportColWidths[lastColIdx] = 160;
+    if (exportColWidths[0] < 120) exportColWidths[0] = 120;
     const sbW = sidebarVisible ? exportColWidths.reduce((a, b) => a + b, 0) : 0;
 
-    // Clip chart width to last bar + small margin instead of full canvas
-    const dataList = viewMode === "tasks" ? tasks : tasks;
     let maxBarPx = 0;
-    for (const t of dataList) {
+    for (const t of tasks) {
       const barEnd = dateToPx(t.end_date) + oneDayPx();
       if (barEnd > maxBarPx) maxBarPx = barEnd;
     }
@@ -1646,14 +1948,15 @@
     const chartH = canvas.height;
     const totalW = sbW + chartW;
     const totalH = headerH + chartH;
-
-    // Count how many header columns fit in the clipped chart width
     const exportCols = Math.ceil(chartW / z.colW);
 
     const out = document.createElement("canvas");
-    out.width = totalW;
-    out.height = totalH;
+    out.width = totalW * DPR;
+    out.height = totalH * DPR;
+    out.style.width = totalW + "px";
+    out.style.height = totalH + "px";
     const ctx = out.getContext("2d");
+    ctx.scale(DPR, DPR);
 
     const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
     const colBg = css("--bg") || "#1a1a2e";
@@ -1662,27 +1965,22 @@
     const colText = css("--text") || "#e0e0e0";
     const colDim = css("--text-dim") || "#8899aa";
 
-    // Background
     ctx.fillStyle = colBg;
     ctx.fillRect(0, 0, totalW, totalH);
 
-    // Draw sidebar header + rows
     if (sidebarVisible) {
       ctx.fillStyle = colSurface;
       ctx.fillRect(0, 0, sbW, totalH);
-
       ctx.strokeStyle = colBorder;
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(sbW, 0); ctx.lineTo(sbW, totalH); ctx.stroke();
 
-      // Sidebar header text
       ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
       ctx.fillStyle = colDim;
       let colX = 0;
       for (let i = 0; i < hdrSpans.length; i++) {
         const w = exportColWidths[i];
         ctx.fillText(hdrSpans[i].textContent.trim(), colX + 8, headerH / 2 + 4);
-        // Column separator
         ctx.strokeStyle = colBorder;
         if (i < hdrSpans.length - 1) {
           ctx.beginPath(); ctx.moveTo(colX + w, 0); ctx.lineTo(colX + w, headerH); ctx.stroke();
@@ -1692,7 +1990,6 @@
       ctx.strokeStyle = colBorder;
       ctx.beginPath(); ctx.moveTo(0, headerH); ctx.lineTo(sbW, headerH); ctx.stroke();
 
-      // Sidebar rows
       const rows = sidebarBody.children;
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
@@ -1718,7 +2015,6 @@
       }
     }
 
-    // Draw chart header (only columns that fit in clipped width)
     ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.fillStyle = colDim;
     ctx.strokeStyle = colBorder;
@@ -1727,57 +2023,200 @@
       const x = sbW + i * z.colW;
       if (z.days <= 1) {
         ctx.fillText(String(d.getDate()), x + 4, headerH / 2);
-        ctx.save();
-        ctx.font = "10px -apple-system, BlinkMacSystemFont, sans-serif";
-        const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        ctx.save(); ctx.font = "10px -apple-system, BlinkMacSystemFont, sans-serif";
         ctx.fillText(MONTHS[d.getMonth()], x + 4, headerH / 2 + 12);
-        ctx.restore();
-        ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.restore(); ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
       } else if (z.days <= 7) {
-        const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
         ctx.fillText(MONTHS[d.getMonth()] + " " + d.getDate(), x + 4, headerH / 2 + 4);
       } else {
-        const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
         ctx.fillText(MONTHS[d.getMonth()] + " " + d.getDate(), x + 4, headerH / 2);
-        ctx.save();
-        ctx.font = "10px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.save(); ctx.font = "10px -apple-system, BlinkMacSystemFont, sans-serif";
         ctx.fillText(String(d.getFullYear()), x + 4, headerH / 2 + 12);
-        ctx.restore();
-        ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.restore(); ctx.font = "600 11px -apple-system, BlinkMacSystemFont, sans-serif";
       }
       ctx.beginPath(); ctx.moveTo(x + z.colW, 0); ctx.lineTo(x + z.colW, headerH); ctx.stroke();
     }
     ctx.beginPath(); ctx.moveTo(sbW, headerH); ctx.lineTo(totalW, headerH); ctx.stroke();
 
-    // Draw the Gantt canvas (clipped)
-    ctx.drawImage(canvas, 0, 0, chartW, chartH, sbW, headerH, chartW, chartH);
+    // Re-render the chart at full DPR resolution for crisp bars/text
+    const hiCanvas = document.createElement("canvas");
+    hiCanvas.width = chartW * DPR;
+    hiCanvas.height = chartH * DPR;
+    const hiCtx = hiCanvas.getContext("2d");
+    hiCtx.scale(DPR, DPR);
 
-    // Draw SVG dependency arrows
+    // Temporarily draw bars onto the hi-res canvas
+    const origCanvas = $("#gantt-canvas");
+    const origWidth = origCanvas.width;
+    const origHeight = origCanvas.height;
+    // Re-use the rendering functions with our hi-res canvas
+    hiCtx.clearRect(0, 0, chartW, chartH);
+    drawGrid(hiCtx, chartW, chartH, z, viewMode === "tasks" ? tasks.length : resViewRows.length);
+    drawToday(hiCtx, chartW, chartH, z);
+    if (viewMode === "tasks") {
+      for (let i = 0; i < tasks.length; i++) {
+        const t = tasks[i];
+        const x1 = dateToPx(t.start_date);
+        const x2 = dateToPx(t.end_date) + oneDayPx();
+        const y = i * ROW_H + BAR_PAD;
+        const w = Math.max(x2 - x1, 8);
+        const barLabel = sidebarCollapsed && t.resources && t.resources.length
+          ? t.name + " \u2014 " + t.resources.map((r) => r.role ? `${r.name} [${r.role}]` : r.name).join(", ")
+          : t.name;
+        drawBar(hiCtx, x1, y, w, t.color, t.progress, barLabel);
+        if (t.resources && t.resources.length > 0) {
+          const dotR = Math.max(2, Math.min(BAR_H * 0.12, 4));
+          const dotY = y + BAR_H - dotR - 1;
+          for (let d = 0; d < t.resources.length; d++) {
+            const dotX = x1 + 8 + d * (dotR * 2 + 2);
+            if (dotX + dotR > x1 + w - 4) break;
+            hiCtx.fillStyle = t.resources[d].color;
+            hiCtx.beginPath();
+            hiCtx.arc(dotX, dotY, dotR, 0, Math.PI * 2);
+            hiCtx.fill();
+          }
+        }
+      }
+    } else {
+      for (let ri = 0; ri < resViewRows.length; ri++) {
+        const rv = resViewRows[ri];
+        const rowY = resRowOffsets[ri];
+        const asns = rv.assignments;
+        const laneH = rv._laneH;
+        const gap = rv._laneCount > 1 ? 1 : 0;
+        for (let i = 0; i < asns.length; i++) {
+          const a = asns[i];
+          const t = a.task;
+          const x1 = dateToPx(t.start_date);
+          const x2 = dateToPx(t.end_date) + oneDayPx();
+          const w = Math.max(x2 - x1, 8);
+          const barH = laneH - gap;
+          const y = rowY + BAR_PAD + rv._lanes[i] * laneH;
+          const meta = a.role && a.allocation !== 100 ? ` (${a.role} | ${a.allocation}%)` : a.role ? ` (${a.role})` : a.allocation !== 100 ? ` (${a.allocation}%)` : "";
+        const label = t.name + meta;
+          drawBar(hiCtx, x1, y, w, t.color, t.progress, label, barH);
+        }
+      }
+    }
+
+    // Draw hi-res chart onto export canvas (source is DPR-scaled pixels, dest is in logical coords with DPR transform)
+    ctx.drawImage(hiCanvas, 0, 0, hiCanvas.width, hiCanvas.height, sbW, headerH, chartW, chartH);
+
+    // Draw SVG dependency arrows — clip to same area as chart
     const svgClone = depSvg.cloneNode(true);
     svgClone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
     svgClone.setAttribute("width", chartW);
     svgClone.setAttribute("height", chartH);
+    svgClone.setAttribute("viewBox", `0 0 ${chartW} ${chartH}`);
     const svgData = new XMLSerializer().serializeToString(svgClone);
     const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(svgBlob);
     const img = new Image();
     img.onload = () => {
-      ctx.drawImage(img, 0, 0, chartW, chartH, sbW, headerH, chartW, chartH);
+      ctx.drawImage(img, sbW, headerH, chartW, chartH);
       URL.revokeObjectURL(url);
-      triggerDownload(out);
+      callback(out);
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      triggerDownload(out);
+      callback(out);
     };
     img.src = url;
   }
 
-  function triggerDownload(canvasEl) {
+  function exportPNG() {
+    const inlineRes = $("#export-inline-resources").checked;
+    exportWithOptions(inlineRes, (out) => triggerDownload(out, "gantt-export.png"));
+  }
+
+  function exportWithOptions(inlineResources, callback) {
+    const origCollapsed = sidebarCollapsed;
+    if (inlineResources) {
+      sidebarCollapsed = true;
+      if (viewMode === "tasks") { renderBars(); renderDeps(); }
+    }
+    const showSidebar = !origCollapsed;
+    buildExportCanvas(showSidebar, (out) => {
+      if (sidebarCollapsed !== origCollapsed) {
+        sidebarCollapsed = origCollapsed;
+        if (viewMode === "tasks") { renderBars(); renderDeps(); }
+      }
+      callback(out);
+    });
+  }
+
+  function triggerDownload(canvasEl, filename) {
     const link = document.createElement("a");
-    link.download = "gantt-export.png";
+    link.download = filename || "gantt-export.png";
     link.href = canvasEl.toDataURL("image/png");
     link.click();
+  }
+
+  function exportPDF() {
+    const inlineRes = $("#export-inline-resources").checked;
+    exportWithOptions(inlineRes, (out) => {
+      const imgDataUrl = out.toDataURL("image/jpeg", 0.92);
+      const imgBase64 = imgDataUrl.split(",")[1];
+      const raw = atob(imgBase64);
+      const imgBytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) imgBytes[i] = raw.charCodeAt(i);
+
+      const w = out.width;
+      const h = out.height;
+      // Page sized to content at 1:1 logical pixels (image is 2x so it stays sharp)
+      const imgW = Math.round(w / 2);
+      const imgH = Math.round(h / 2);
+      const pageW = imgW + 40;
+      const pageH = imgH + 40;
+
+      // Build PDF objects
+      const objs = [];
+      const addObj = (s) => { objs.push(s); return objs.length; };
+
+      addObj(`<< /Type /Catalog /Pages 2 0 R >>`);
+      addObj(`<< /Type /Pages /Kids [3 0 R] /Count 1 >>`);
+      addObj(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Contents 4 0 R /Resources << /XObject << /Img 5 0 R >> >> >>`);
+
+      const content = `q ${imgW} 0 0 ${imgH} 20 20 cm /Img Do Q`;
+      addObj(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+      // Object 5 is the image — will be handled specially due to binary stream
+
+      // Assemble text portion up to image stream
+      let body = "%PDF-1.4\n";
+      const offsets = [];
+      for (let i = 0; i < objs.length; i++) {
+        offsets.push(body.length);
+        body += `${i + 1} 0 obj\n${objs[i]}\nendobj\n`;
+      }
+
+      // Image object header
+      const imgObjHeader = `5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imgBytes.length} >>\nstream\n`;
+      const imgObjFooter = `\nendstream\nendobj\n`;
+
+      const preImg = new TextEncoder().encode(body);
+      const imgHeader = new TextEncoder().encode(imgObjHeader);
+      const imgFooter = new TextEncoder().encode(imgObjFooter);
+
+      offsets.push(preImg.length); // offset for obj 5
+
+      const xrefStart = preImg.length + imgHeader.length + imgBytes.length + imgFooter.length;
+
+      let xref = `xref\n0 6\n0000000000 65535 f \n`;
+      for (let i = 0; i < offsets.length; i++) {
+        xref += String(offsets[i]).padStart(10, "0") + ` 00000 n \n`;
+      }
+      xref += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+
+      const xrefBytes = new TextEncoder().encode(xref);
+
+      const pdfBlob = new Blob([preImg, imgHeader, imgBytes, imgFooter, xrefBytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(pdfBlob);
+      const link = document.createElement("a");
+      link.download = "gantt-export.pdf";
+      link.href = url;
+      link.click();
+      URL.revokeObjectURL(url);
+    });
   }
 
   // ── Event bindings ────────────────────────────────────
@@ -1792,13 +2231,24 @@
     });
     $("#btn-manage-projects").addEventListener("click", () => openProjectListModal());
     $("#btn-settings").addEventListener("click", () => openSettingsModal());
-    $("#btn-export-png").addEventListener("click", () => exportPNG());
+    $("#btn-export").addEventListener("click", () => { $("#export-modal").classList.add("open"); });
+    $("#btn-export-close").addEventListener("click", () => { $("#export-modal").classList.remove("open"); });
+    $("#btn-export-png").addEventListener("click", () => { $("#export-modal").classList.remove("open"); exportPNG(); });
+    $("#btn-export-pdf").addEventListener("click", () => { $("#export-modal").classList.remove("open"); exportPDF(); });
     $("#btn-themes").addEventListener("click", () => openThemeListModal());
     $("#btn-help").addEventListener("click", () => { $("#help-modal").classList.add("open"); });
     $("#btn-help-close").addEventListener("click", () => { $("#help-modal").classList.remove("open"); });
     $("#btn-seed").addEventListener("click", async () => {
       await api("/api/seed", "POST");
       closeAllModals();
+      await loadAll();
+    });
+    $("#btn-reset-all").addEventListener("click", async () => {
+      if (!confirm("This will permanently delete ALL projects, tasks, resources, and dependencies.\n\nAre you sure?")) return;
+      if (!confirm("This cannot be undone. Continue?")) return;
+      await api("/api/reset", "POST");
+      closeAllModals();
+      currentProjectId = null;
       await loadAll();
     });
 
@@ -1832,6 +2282,12 @@
     // Task form — collects resource_ids from checkboxes
     $("#task-form").addEventListener("submit", async (e) => {
       e.preventDefault();
+      const startVal = $("#task-start").value;
+      const endVal = $("#task-end").value;
+      if (startVal && endVal && endVal < startVal) {
+        alert("End date cannot be before start date.");
+        return;
+      }
       const id = $("#task-id").value;
       const color = $("#task-color").value;
       saveRecentColor(color);
@@ -1845,16 +2301,29 @@
       const data = {
         name: $("#task-name").value,
         description: $("#task-desc").value,
-        start_date: $("#task-start").value,
-        end_date: $("#task-end").value,
+        start_date: startVal,
+        end_date: endVal,
         progress: parseInt($("#task-progress").value) || 0,
         resource_ids: resourceIds,
         color: color,
         parent_id: $("#task-parent").value ? parseInt($("#task-parent").value) : null,
         project_id: $("#task-project").value ? parseInt($("#task-project").value) : null,
       };
-      if (id) await api(`/api/tasks/${id}`, "PUT", data);
-      else await api("/api/tasks", "POST", data);
+      if (id) {
+        const oldTask = tasks.find((x) => x.id === parseInt(id));
+        const before = oldTask ? {
+          name: oldTask.name, description: oldTask.description,
+          start_date: oldTask.start_date, end_date: oldTask.end_date,
+          progress: oldTask.progress, color: oldTask.color,
+          resource_ids: oldTask.resources.map((r) => ({ id: r.id, allocation: r.allocation, role: r.role || undefined })),
+          parent_id: oldTask.parent_id, project_id: oldTask.project_id,
+        } : null;
+        await api(`/api/tasks/${id}`, "PUT", data);
+        if (before) pushUndo({ type: "task-update", id: parseInt(id), before });
+      } else {
+        const result = await api("/api/tasks", "POST", data);
+        if (result && result.id) pushUndo({ type: "task-create", id: result.id });
+      }
       closeAllModals();
       await loadAll();
     });
@@ -1863,7 +2332,23 @@
     $("#btn-task-delete").addEventListener("click", async () => {
       const id = $("#task-id").value;
       if (id && confirm("Delete this task?")) {
+        const oldTask = tasks.find((x) => x.id === parseInt(id));
+        const taskDeps = deps.filter((d) => d.predecessor_id === parseInt(id) || d.successor_id === parseInt(id));
         await api(`/api/tasks/${id}`, "DELETE");
+        if (oldTask) {
+          pushUndo({
+            type: "task-delete", oldId: parseInt(id),
+            data: {
+              name: oldTask.name, description: oldTask.description,
+              start_date: oldTask.start_date, end_date: oldTask.end_date,
+              progress: oldTask.progress, color: oldTask.color,
+              resource_ids: oldTask.resources.map((r) => ({ id: r.id, allocation: r.allocation, role: r.role || undefined })),
+              parent_id: oldTask.parent_id, project_id: oldTask.project_id,
+              sort_order: oldTask.sort_order,
+            },
+            deps: taskDeps.map((d) => ({ predecessor_id: d.predecessor_id, successor_id: d.successor_id, dep_type: d.dep_type, lag: d.lag })),
+          });
+        }
         closeAllModals(); await loadAll();
       }
     });
@@ -1992,6 +2477,41 @@
     // Theme manager
     $("#btn-add-theme").addEventListener("click", () => openThemeEditModal(null));
     $("#btn-theme-list-close").addEventListener("click", () => { $("#theme-list-modal").classList.remove("open"); });
+    $("#btn-export-themes").addEventListener("click", () => {
+      const data = { version: 1, themes: customThemes };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "themes.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+    $("#btn-import-themes").addEventListener("click", () => { $("#theme-import-file").click(); });
+    $("#theme-import-file").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          const imported = data.themes || data;
+          let count = 0;
+          for (const [key, theme] of Object.entries(imported)) {
+            if (!theme.name || !theme.vars) continue;
+            let finalKey = key;
+            if (BUILTIN_THEMES[finalKey]) finalKey = finalKey + "-custom";
+            customThemes[finalKey] = { name: theme.name, vars: theme.vars };
+            count++;
+          }
+          saveCustomThemes();
+          openThemeListModal();
+          alert(`Imported ${count} theme${count !== 1 ? "s" : ""}.`);
+        } catch { alert("Invalid theme file."); }
+      };
+      reader.readAsText(file);
+      e.target.value = "";
+    });
     $("#btn-theme-edit-cancel").addEventListener("click", closeThemeEditModal);
     // Live preview as colors change
     for (const id of ["theme-bg","theme-surface","theme-surface2","theme-border","theme-text","theme-text-dim","theme-accent","theme-danger"]) {
@@ -2042,6 +2562,7 @@
       };
       const result = await api("/api/dependencies", "POST", data);
       if (result && result.error) { alert(result.error); return; }
+      if (result && result.id) pushUndo({ type: "dep-create", id: result.id });
       closeAllModals(); await loadAll();
     });
     $("#btn-dep-cancel").addEventListener("click", closeAllModals);
@@ -2061,6 +2582,16 @@
       });
     });
     document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+        return;
+      }
       if (e.key !== "Escape") return;
       if ($("#theme-edit-modal").classList.contains("open")) closeThemeEditModal();
       else if ($("#resource-modal").classList.contains("open")) closeResourceModal();

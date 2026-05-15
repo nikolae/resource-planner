@@ -198,11 +198,15 @@ def get_tasks():
 @app.route("/api/tasks", methods=["POST"])
 def create_task():
     data = request.json
+    start = date.fromisoformat(data["start_date"])
+    end = date.fromisoformat(data["end_date"])
+    if end < start:
+        return jsonify({"error": "End date cannot be before start date"}), 400
     t = Task(
         name=data["name"],
         description=data.get("description", ""),
-        start_date=date.fromisoformat(data["start_date"]),
-        end_date=date.fromisoformat(data["end_date"]),
+        start_date=start,
+        end_date=end,
         progress=data.get("progress", 0),
         color=data.get("color"),
         sort_order=data.get("sort_order", 0),
@@ -220,14 +224,18 @@ def create_task():
 def update_task(tid):
     t = Task.query.get_or_404(tid)
     data = request.json
+    new_start = date.fromisoformat(data["start_date"]) if "start_date" in data else t.start_date
+    new_end = date.fromisoformat(data["end_date"]) if "end_date" in data else t.end_date
+    if new_end < new_start:
+        return jsonify({"error": "End date cannot be before start date"}), 400
     if "name" in data:
         t.name = data["name"]
     if "description" in data:
         t.description = data["description"]
     if "start_date" in data:
-        t.start_date = date.fromisoformat(data["start_date"])
+        t.start_date = new_start
     if "end_date" in data:
-        t.end_date = date.fromisoformat(data["end_date"])
+        t.end_date = new_end
     if "progress" in data:
         t.progress = data["progress"]
     if "color" in data:
@@ -503,6 +511,19 @@ def seed_data():
     ])
     db.session.commit()
     return jsonify({"msg": "Seeded"}), 201
+
+
+# ── Reset all data ────────────────────────────────────
+
+@app.route("/api/reset", methods=["POST"])
+def reset_data():
+    Dependency.query.delete()
+    TaskResource.query.delete()
+    Task.query.delete()
+    Project.query.delete()
+    Resource.query.delete()
+    db.session.commit()
+    return jsonify({"msg": "All data cleared"}), 200
 
 
 if __name__ == "__main__":
