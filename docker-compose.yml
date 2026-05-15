@@ -1,6 +1,7 @@
 services:
   resource-planner:
     build: .
+    image: resource-planner
     ports:
       - "5000:5000"
     volumes:

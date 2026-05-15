@@ -30,31 +30,34 @@ db.init_app(app)
 
 with app.app_context():
     from sqlalchemy import inspect, text
-    insp = inspect(db.engine)
-    # Migrate task_resource: old schema had composite PK (task_id, resource_id), new has surrogate id PK
-    if "task_resource" in insp.get_table_names():
-        cols = [c["name"] for c in insp.get_columns("task_resource")]
-        if "id" not in cols:
-            db.session.execute(text("ALTER TABLE task_resource RENAME TO _task_resource_old"))
-            db.session.execute(text("""
-                CREATE TABLE task_resource (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    task_id INTEGER NOT NULL REFERENCES task(id),
-                    resource_id INTEGER NOT NULL REFERENCES resource(id),
-                    allocation INTEGER DEFAULT 100,
-                    role VARCHAR(120)
-                )
-            """))
-            old_cols = [c["name"] for c in insp.get_columns("_task_resource_old")]
-            if "role" in old_cols:
-                db.session.execute(text("INSERT INTO task_resource (task_id, resource_id, allocation, role) SELECT task_id, resource_id, allocation, role FROM _task_resource_old"))
-            else:
-                db.session.execute(text("INSERT INTO task_resource (task_id, resource_id, allocation) SELECT task_id, resource_id, allocation FROM _task_resource_old"))
-            db.session.execute(text("DROP TABLE _task_resource_old"))
-            db.session.commit()
-        elif "role" not in cols:
-            db.session.execute(text("ALTER TABLE task_resource ADD COLUMN role VARCHAR(120)"))
-            db.session.commit()
+    try:
+        insp = inspect(db.engine)
+        # Migrate task_resource: old schema had composite PK (task_id, resource_id), new has surrogate id PK
+        if "task_resource" in insp.get_table_names():
+            cols = [c["name"] for c in insp.get_columns("task_resource")]
+            if "id" not in cols:
+                db.session.execute(text("ALTER TABLE task_resource RENAME TO _task_resource_old"))
+                db.session.execute(text("""
+                    CREATE TABLE task_resource (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id INTEGER NOT NULL REFERENCES task(id),
+                        resource_id INTEGER NOT NULL REFERENCES resource(id),
+                        allocation INTEGER DEFAULT 100,
+                        role VARCHAR(120)
+                    )
+                """))
+                old_cols = [c["name"] for c in insp.get_columns("_task_resource_old")]
+                if "role" in old_cols:
+                    db.session.execute(text("INSERT INTO task_resource (task_id, resource_id, allocation, role) SELECT task_id, resource_id, allocation, role FROM _task_resource_old"))
+                else:
+                    db.session.execute(text("INSERT INTO task_resource (task_id, resource_id, allocation) SELECT task_id, resource_id, allocation FROM _task_resource_old"))
+                db.session.execute(text("DROP TABLE _task_resource_old"))
+                db.session.commit()
+            elif "role" not in cols:
+                db.session.execute(text("ALTER TABLE task_resource ADD COLUMN role VARCHAR(120)"))
+                db.session.commit()
+    except Exception:
+        db.session.rollback()
     db.create_all()
 
 
