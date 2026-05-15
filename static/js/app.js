@@ -402,6 +402,7 @@
     }
     sel.value = currentProjectId || "";
     $("#btn-edit-project").style.display = currentProjectId ? "inline-block" : "none";
+    $("#btn-export-project").style.display = currentProjectId ? "inline-block" : "none";
   }
 
   function computeTimeline() {
@@ -2068,7 +2069,12 @@
       const rows = sidebarBody.children;
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
-        const y = headerH + i * ROW_H;
+        const rowH = (viewMode === "resources" && resViewRows[i] && resViewRows[i]._rowH) ? resViewRows[i]._rowH : ROW_H;
+        const y = viewMode === "resources" ? headerH + (resRowOffsets[i] || 0) : headerH + i * ROW_H;
+        if (i % 2 === 1) {
+          ctx.fillStyle = colBorder + "20";
+          ctx.fillRect(0, y, sbW, rowH);
+        }
         const spans = Array.from(row.children);
         let cx = 0;
         for (let j = 0; j < spans.length; j++) {
@@ -2079,14 +2085,14 @@
                            : "13px -apple-system, BlinkMacSystemFont, sans-serif";
           ctx.save();
           ctx.beginPath();
-          ctx.rect(cx, y, w, ROW_H);
+          ctx.rect(cx, y, w, rowH);
           ctx.clip();
-          ctx.fillText(spans[j].textContent.trim(), cx + 8, y + ROW_H / 2 + 4);
+          ctx.fillText(spans[j].textContent.trim(), cx + 8, y + rowH / 2 + 4);
           ctx.restore();
           cx += w;
         }
         ctx.strokeStyle = colBorder;
-        ctx.beginPath(); ctx.moveTo(0, y + ROW_H); ctx.lineTo(sbW, y + ROW_H); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, y + rowH); ctx.lineTo(sbW, y + rowH); ctx.stroke();
       }
     }
 
@@ -2126,7 +2132,25 @@
     const origHeight = origCanvas.height;
     // Re-use the rendering functions with our hi-res canvas
     hiCtx.clearRect(0, 0, chartW, chartH);
-    drawGrid(hiCtx, chartW, chartH, z, viewMode === "tasks" ? tasks.length : resViewRows.length);
+    if (viewMode === "resources") {
+      drawGridVariable(hiCtx, chartW, chartH, z);
+    } else {
+      drawGrid(hiCtx, chartW, chartH, z, tasks.length);
+    }
+    // Alternating row stripes on chart
+    const stripColor = (cssVar("--border") || "#1a4080") + "20";
+    hiCtx.fillStyle = stripColor;
+    if (viewMode === "tasks") {
+      for (let i = 1; i < tasks.length; i += 2) {
+        hiCtx.fillRect(0, i * ROW_H, chartW, ROW_H);
+      }
+    } else {
+      for (let i = 1; i < resViewRows.length; i += 2) {
+        const ry = resRowOffsets[i] || 0;
+        const rh = resViewRows[i]._rowH || ROW_H;
+        hiCtx.fillRect(0, ry, chartW, rh);
+      }
+    }
     drawToday(hiCtx, chartW, chartH, z);
     if (viewMode === "tasks") {
       for (let i = 0; i < tasks.length; i++) {
@@ -2305,6 +2329,19 @@
       if (p) openProjectModal(p);
     });
     $("#btn-manage-projects").addEventListener("click", () => openProjectListModal());
+    $("#btn-export-project").addEventListener("click", async () => {
+      if (!currentProjectId) return;
+      const data = await api(`/api/projects/${currentProjectId}/export`);
+      const p = projects.find((p) => p.id === currentProjectId);
+      const filename = (p ? p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "project") + ".json";
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const link = document.createElement("a");
+      link.download = filename;
+      link.href = URL.createObjectURL(blob);
+      link.click();
+      URL.revokeObjectURL(link.href);
+    });
+    $("#btn-import-project").addEventListener("click", () => { $("#import-file-input").click(); });
     $("#btn-settings").addEventListener("click", () => openSettingsModal());
     $("#btn-export").addEventListener("click", () => { $("#export-modal").classList.add("open"); });
     $("#btn-export-close").addEventListener("click", () => { $("#export-modal").classList.remove("open"); });

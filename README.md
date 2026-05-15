@@ -56,8 +56,8 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Project selector dropdown in the header to filter the Gantt view to a single project
 - "All Projects" view to see everything at once
 - Deleting a project removes all its tasks, assignments, and dependencies
-- **Export** — download any project as a self-contained JSON file (includes tasks, resources, assignments, dependencies with relative references)
-- **Import** — upload a previously exported JSON file to recreate a project; existing resources are matched by name to avoid duplicates
+- **Export** — download any project as a self-contained JSON file (includes tasks, resources, assignments, dependencies with relative references); available via the header icon (↓) when a project is selected, or per-project in the manage modal
+- **Import** — upload a previously exported JSON file to recreate a project; available via the header icon (↑) or from the manage modal; existing resources are matched by name to avoid duplicates
 - Demo data seeds two sample projects: "Website Redesign" and "Mobile App"
 
 ### Tasks
@@ -79,6 +79,7 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Each resource shows its color, name, and role with inline edit and delete buttons
 - **Multi-select with checkboxes** and **Select All / Deselect All** for batch deletion
 - Create new resources from the list view via "+ Add Resource"
+- **Drag to reorder** — drag resource rows vertically in the Resources view to reorder; order is persisted
 - Fields: name, role, color
 - Assign resources to tasks; task bars inherit the first resource's color unless overridden
 - Resources are shared across all projects
@@ -112,7 +113,9 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Click **Export** in the header to open the export modal with PNG and PDF options
 - Composites sidebar (columns, header, rows), date header, task bars, dependency arrows, and overlays into a single image
 - **2x resolution rendering** — all text, bars, and lines are re-rendered at high DPI for crisp output
+- **Alternating row stripes** — odd rows have a subtle background tint for easier visual tracking in exported images
 - Sidebar columns are widened in export (min 120px task, 160px resource) to prevent truncation
+- **Variable row heights** — resource view exports correctly render rows with different heights from lane stacking
 - **"Show resource names on bars"** checkbox — overlays resource names on bars even when the sidebar is visible
 - Chart is clipped to the last task bar plus a small margin — no wasted empty space on the right
 - PDF pages are sized to content (no scaling down to fit A4), so text is readable at 100% zoom
