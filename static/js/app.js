@@ -2223,9 +2223,15 @@
     img.src = url;
   }
 
+  function exportFilename(ext) {
+    const p = projects.find((p) => p.id === currentProjectId);
+    const proj = p ? p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "all-projects";
+    return `export-${proj}-${viewMode}.${ext}`;
+  }
+
   function exportPNG() {
     const inlineRes = $("#export-inline-resources").checked;
-    exportWithOptions(inlineRes, (out) => triggerDownload(out, "gantt-export.png"));
+    exportWithOptions(inlineRes, (out) => triggerDownload(out, exportFilename("png")));
   }
 
   function exportWithOptions(inlineResources, callback) {
@@ -2311,7 +2317,7 @@
       const pdfBlob = new Blob([preImg, imgHeader, imgBytes, imgFooter, xrefBytes], { type: "application/pdf" });
       const url = URL.createObjectURL(pdfBlob);
       const link = document.createElement("a");
-      link.download = "gantt-export.pdf";
+      link.download = exportFilename("pdf");
       link.href = url;
       link.click();
       URL.revokeObjectURL(url);
