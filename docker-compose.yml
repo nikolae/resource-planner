@@ -1,0 +1,12 @@
+services:
+  resource-planner:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - planner-data:/app/instance
+      - ./config.json:/app/config.json
+    restart: unless-stopped
+
+volumes:
+  planner-data:

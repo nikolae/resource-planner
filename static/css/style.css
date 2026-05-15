@@ -181,7 +181,7 @@ main { flex: 1; overflow: hidden; }
   white-space: nowrap;
 }
 .col-name { flex: 2; min-width: 0; }
-.col-resource { flex: 1; min-width: 0; }
+.col-resource { flex: 2; min-width: 0; }
 .col-dates { flex: 1; min-width: 0; }
 
 .col-resize-handle {
@@ -207,7 +207,7 @@ main { flex: 1; overflow: hidden; }
   font-size: 13px;
   transition: background .1s;
 }
-.sidebar-row:hover { background: var(--surface2); }
+.sidebar-row:hover, .sidebar-row.row-highlight { background: var(--surface2); }
 .sidebar-row > span {
   padding: 0 8px;
   overflow: hidden;
@@ -269,6 +269,14 @@ main { flex: 1; overflow: hidden; }
   left: 0;
 }
 
+#row-highlight-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
 #dep-svg {
   position: absolute;
   top: 0;
@@ -302,7 +310,7 @@ main { flex: 1; overflow: hidden; }
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 24px;
-  width: 420px;
+  width: 500px;
   max-height: 90vh;
   overflow-y: auto;
 }
@@ -365,37 +373,43 @@ main { flex: 1; overflow: hidden; }
 /* Resource checklist in task modal */
 .resource-checklist {
   margin-top: 4px;
-  max-height: 120px;
+  max-height: 160px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
 }
-.resource-checklist label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
-  margin-bottom: 0;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--text);
-}
-.resource-checklist label:hover { background: var(--surface2); }
-.resource-checklist input[type="checkbox"] {
-  width: auto;
-  display: inline;
-  margin: 0;
-  accent-color: var(--accent);
-}
 .resource-checklist .rc-dot {
   width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.resource-checklist .rc-assignment-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin-bottom: 0;
+  cursor: default;
+}
+.resource-checklist .rc-assignment-row:hover { background: var(--surface2); }
+.resource-checklist .rc-name {
+  font-size: 13px;
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.resource-checklist .rc-role {
+  width: 60px !important;
+  display: inline !important;
+  padding: 2px 4px;
+  margin: 0 0 0 auto;
+  font-size: 11px;
 }
 .resource-checklist .rc-alloc {
   width: 48px !important;
   display: inline !important;
   padding: 2px 4px;
-  margin: 0 0 0 auto;
+  margin: 0;
   text-align: right;
   font-size: 12px;
 }
@@ -403,6 +417,27 @@ main { flex: 1; overflow: hidden; }
   font-size: 11px;
   color: var(--text-dim);
   flex-shrink: 0;
+}
+.resource-checklist .rc-remove {
+  padding: 0 4px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.resource-checklist .rc-remove:hover { color: var(--danger); }
+.resource-checklist .rc-adder {
+  padding: 4px 8px;
+}
+.resource-checklist .rc-add-select {
+  width: 100%;
+  padding: 4px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 /* Color picker group */
@@ -544,7 +579,7 @@ main { flex: 1; overflow: hidden; }
 .theme-light .btn-primary:hover { background: #1d4ed8; }
 .theme-light .btn-toggle.active { background: var(--accent); color: #fff; }
 .theme-light .color-swatch.active { border-color: #333; }
-.theme-light .sidebar-row:hover { background: var(--surface2); }
+.theme-light .sidebar-row:hover, .theme-light .sidebar-row.row-highlight { background: var(--surface2); }
 .theme-light .resource-list-item:hover { background: var(--surface2); }
 .theme-light .resource-checklist label:hover { background: var(--surface2); }
 

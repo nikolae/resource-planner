@@ -29,6 +29,32 @@ app.config["SECRET_KEY"] = config["secret_key"]
 db.init_app(app)
 
 with app.app_context():
+    from sqlalchemy import inspect, text
+    insp = inspect(db.engine)
+    # Migrate task_resource: old schema had composite PK (task_id, resource_id), new has surrogate id PK
+    if "task_resource" in insp.get_table_names():
+        cols = [c["name"] for c in insp.get_columns("task_resource")]
+        if "id" not in cols:
+            db.session.execute(text("ALTER TABLE task_resource RENAME TO _task_resource_old"))
+            db.session.execute(text("""
+                CREATE TABLE task_resource (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id INTEGER NOT NULL REFERENCES task(id),
+                    resource_id INTEGER NOT NULL REFERENCES resource(id),
+                    allocation INTEGER DEFAULT 100,
+                    role VARCHAR(120)
+                )
+            """))
+            old_cols = [c["name"] for c in insp.get_columns("_task_resource_old")]
+            if "role" in old_cols:
+                db.session.execute(text("INSERT INTO task_resource (task_id, resource_id, allocation, role) SELECT task_id, resource_id, allocation, role FROM _task_resource_old"))
+            else:
+                db.session.execute(text("INSERT INTO task_resource (task_id, resource_id, allocation) SELECT task_id, resource_id, allocation FROM _task_resource_old"))
+            db.session.execute(text("DROP TABLE _task_resource_old"))
+            db.session.commit()
+        elif "role" not in cols:
+            db.session.execute(text("ALTER TABLE task_resource ADD COLUMN role VARCHAR(120)"))
+            db.session.commit()
     db.create_all()
 
 
@@ -143,16 +169,18 @@ def delete_resource(rid):
 
 
 def _sync_task_resources(t, resource_entries):
-    """resource_entries: list of {id, allocation} dicts or plain int ids."""
+    """resource_entries: list of {id, allocation, role} dicts or plain int ids."""
     TaskResource.query.filter_by(task_id=t.id).delete()
     for entry in (resource_entries or []):
         if isinstance(entry, dict):
             rid = entry["id"]
             alloc = entry.get("allocation", 100)
+            role = entry.get("role") or None
         else:
             rid = entry
             alloc = 100
-        db.session.add(TaskResource(task_id=t.id, resource_id=rid, allocation=alloc))
+            role = None
+        db.session.add(TaskResource(task_id=t.id, resource_id=rid, allocation=alloc, role=role))
 
 
 # ── Tasks ──────────────────────────────────────────────
@@ -274,6 +302,141 @@ def delete_dependency(did):
     db.session.delete(d)
     db.session.commit()
     return "", 204
+
+
+# ── Export / Import ────────────────────────────────────
+
+@app.route("/api/projects/<int:pid>/export", methods=["GET"])
+def export_project(pid):
+    p = Project.query.get_or_404(pid)
+    proj_tasks = Task.query.filter_by(project_id=pid).order_by(Task.sort_order, Task.start_date).all()
+    task_ids = [t.id for t in proj_tasks]
+
+    # Include all resources (they are a shared pool needed for assignment context)
+    resources_list = Resource.query.order_by(Resource.name).all()
+    task_resource_rows = TaskResource.query.filter(TaskResource.task_id.in_(task_ids)).all() if task_ids else []
+
+    # Dependencies within this project
+    deps_list = Dependency.query.filter(
+        Dependency.predecessor_id.in_(task_ids),
+        Dependency.successor_id.in_(task_ids),
+    ).all() if task_ids else []
+
+    # Build export payload with stable local indices
+    task_id_to_idx = {t.id: i for i, t in enumerate(proj_tasks)}
+    res_id_to_idx = {r.id: i for i, r in enumerate(resources_list)}
+
+    export_data = {
+        "version": 1,
+        "project": {"name": p.name, "description": p.description, "color": p.color},
+        "resources": [{"name": r.name, "role": r.role, "color": r.color} for r in resources_list],
+        "tasks": [
+            {
+                "name": t.name,
+                "description": t.description or "",
+                "start_date": t.start_date.isoformat(),
+                "end_date": t.end_date.isoformat(),
+                "progress": t.progress,
+                "color": t.color,
+                "sort_order": t.sort_order,
+                "parent_idx": task_id_to_idx.get(t.parent_id) if t.parent_id else None,
+            }
+            for t in proj_tasks
+        ],
+        "assignments": [
+            {
+                "task_idx": task_id_to_idx[tr.task_id],
+                "resource_idx": res_id_to_idx[tr.resource_id],
+                "allocation": tr.allocation,
+                "role": tr.role,
+            }
+            for tr in task_resource_rows
+        ],
+        "dependencies": [
+            {
+                "predecessor_idx": task_id_to_idx[d.predecessor_id],
+                "successor_idx": task_id_to_idx[d.successor_id],
+                "dep_type": d.dep_type,
+                "lag": d.lag,
+            }
+            for d in deps_list
+        ],
+    }
+    return jsonify(export_data)
+
+
+@app.route("/api/projects/import", methods=["POST"])
+def import_project():
+    data = request.json
+    if not data or "project" not in data:
+        return jsonify({"error": "Invalid import data"}), 400
+
+    # Create project
+    pd = data["project"]
+    p = Project(name=pd["name"], description=pd.get("description", ""), color=pd.get("color", "#4a86c8"))
+    db.session.add(p)
+    db.session.flush()
+
+    # Create or reuse resources (match by name)
+    res_idx_to_id = {}
+    for i, rd in enumerate(data.get("resources", [])):
+        existing = Resource.query.filter_by(name=rd["name"]).first()
+        if existing:
+            res_idx_to_id[i] = existing.id
+        else:
+            r = Resource(name=rd["name"], role=rd.get("role", ""), color=rd.get("color", "#4a86c8"))
+            db.session.add(r)
+            db.session.flush()
+            res_idx_to_id[i] = r.id
+
+    # Create tasks (two passes for parent references)
+    task_idx_to_id = {}
+    task_defs = data.get("tasks", [])
+    for i, td in enumerate(task_defs):
+        t = Task(
+            name=td["name"],
+            description=td.get("description", ""),
+            start_date=date.fromisoformat(td["start_date"]),
+            end_date=date.fromisoformat(td["end_date"]),
+            progress=td.get("progress", 0),
+            color=td.get("color"),
+            sort_order=td.get("sort_order", i),
+            project_id=p.id,
+        )
+        db.session.add(t)
+        db.session.flush()
+        task_idx_to_id[i] = t.id
+
+    # Set parent references
+    for i, td in enumerate(task_defs):
+        if td.get("parent_idx") is not None:
+            parent_id = task_idx_to_id.get(td["parent_idx"])
+            if parent_id:
+                Task.query.get(task_idx_to_id[i]).parent_id = parent_id
+
+    # Create assignments
+    for a in data.get("assignments", []):
+        tid = task_idx_to_id.get(a["task_idx"])
+        rid = res_idx_to_id.get(a["resource_idx"])
+        if tid and rid:
+            db.session.add(TaskResource(
+                task_id=tid, resource_id=rid,
+                allocation=a.get("allocation", 100),
+                role=a.get("role") or None,
+            ))
+
+    # Create dependencies
+    for d in data.get("dependencies", []):
+        pred_id = task_idx_to_id.get(d["predecessor_idx"])
+        succ_id = task_idx_to_id.get(d["successor_idx"])
+        if pred_id and succ_id:
+            db.session.add(Dependency(
+                predecessor_id=pred_id, successor_id=succ_id,
+                dep_type=d.get("dep_type", "FS"), lag=d.get("lag", 0),
+            ))
+
+    db.session.commit()
+    return jsonify(p.to_dict()), 201
 
 
 # ── Seed demo data ─────────────────────────────────────

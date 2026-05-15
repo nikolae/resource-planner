@@ -6,9 +6,11 @@ db = SQLAlchemy()
 
 class TaskResource(db.Model):
     __tablename__ = "task_resource"
-    task_id = db.Column(db.Integer, db.ForeignKey("task.id"), primary_key=True)
-    resource_id = db.Column(db.Integer, db.ForeignKey("resource.id"), primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
+    task_id = db.Column(db.Integer, db.ForeignKey("task.id"), nullable=False)
+    resource_id = db.Column(db.Integer, db.ForeignKey("resource.id"), nullable=False)
     allocation = db.Column(db.Integer, default=100)  # percentage 0-100
+    role = db.Column(db.String(120), nullable=True)  # overrides resource.role when set
 
     resource = db.relationship("Resource", lazy=True)
 
@@ -67,10 +69,25 @@ class Task(db.Model):
 
     def to_dict(self):
         res_list = [
-            {"id": tr.resource.id, "name": tr.resource.name, "color": tr.resource.color, "allocation": tr.allocation}
+            {
+                "id": tr.resource.id,
+                "name": tr.resource.name,
+                "color": tr.resource.color,
+                "allocation": tr.allocation,
+                "role": tr.role or tr.resource.role or "",
+            }
             for tr in self.task_resources
         ]
         first_color = res_list[0]["color"] if res_list else "#4a86c8"
+
+        def _fmt_resource(r):
+            parts = [r["name"]]
+            if r["role"]:
+                parts[0] += f' [{r["role"]}]'
+            if r["allocation"] != 100:
+                parts.append(f'{r["allocation"]}%')
+            return parts[0] if len(parts) == 1 else f'{parts[0]} ({parts[1]})'
+
         return {
             "id": self.id,
             "name": self.name,
@@ -80,10 +97,7 @@ class Task(db.Model):
             "progress": self.progress,
             "resource_ids": [r["id"] for r in res_list],
             "resources": res_list,
-            "resource_name": ", ".join(
-                f'{r["name"]} ({r["allocation"]}%)' if r["allocation"] != 100 else r["name"]
-                for r in res_list
-            ) or None,
+            "resource_name": ", ".join(_fmt_resource(r) for r in res_list) or None,
             "color": self.color or first_color,
             "sort_order": self.sort_order,
             "parent_id": self.parent_id,

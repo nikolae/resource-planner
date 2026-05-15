@@ -290,9 +290,22 @@
     const DAY_MS = 86400000;
     for (const r of resources) {
       const rTasks = tasks.filter((t) => t.resource_ids.includes(r.id));
+      // Build individual assignments (one per role entry, not collapsed)
+      const assignments = [];
+      for (const t of rTasks) {
+        const allocs = (t.resources || []).filter((x) => x.id === r.id);
+        if (allocs.length === 0) {
+          assignments.push({ task: t, allocation: 100, role: "" });
+        } else {
+          for (const a of allocs) {
+            assignments.push({ task: t, allocation: a.allocation, role: a.role || "" });
+          }
+        }
+      }
       const taskAllocs = rTasks.map((t) => {
-        const ra = (t.resources || []).find((x) => x.id === r.id);
-        return { task: t, allocation: ra ? ra.allocation : 100 };
+        const allocs = (t.resources || []).filter((x) => x.id === r.id);
+        const totalAlloc = allocs.reduce((sum, x) => sum + x.allocation, 0);
+        return { task: t, allocation: totalAlloc || 100 };
       });
 
       // Build per-day utilization map and find overloaded spans
@@ -334,7 +347,7 @@
         span.util = peak;
       }
 
-      resViewRows.push({ resource: r, tasks: rTasks, taskAllocs, overloaded, peakUtil });
+      resViewRows.push({ resource: r, tasks: rTasks, assignments, taskAllocs, overloaded, peakUtil });
     }
   }
 
@@ -348,21 +361,26 @@
       renderDeps();
     } else {
       buildResourceView();
+      computeResRowLayout();
       renderResourceSidebar();
       renderHeader();
       renderResourceBars();
       renderResourceOverlaps();
     }
     applyColWidths();
+    hoveredRowIdx = -1;
+    drawRowHighlight();
   }
 
   function renderSidebar() {
     const body = $("#sidebar-body");
     body.innerHTML = "";
-    for (const t of tasks) {
+    for (let idx = 0; idx < tasks.length; idx++) {
+      const t = tasks[idx];
       const row = document.createElement("div");
       row.className = "sidebar-row";
       row.dataset.id = t.id;
+      row.dataset.rowIdx = idx;
       const indent = t.parent_id ? "padding-left:20px;" : "";
       const dots = (t.resources || []).map(
         (r) => `<span class="task-dot" style="background:${r.color}" title="${esc(r.name)}"></span>`
@@ -378,29 +396,41 @@
         <span class="col-resource" title="${esc(names)}">${esc(names)}</span>`;
       row.addEventListener("click", () => openTaskModal(t));
       row.addEventListener("contextmenu", (e) => showCtxMenu(e, t));
+      row.addEventListener("mouseenter", () => setHoveredRow(idx));
+      row.addEventListener("mouseleave", () => setHoveredRow(-1));
       body.appendChild(row);
     }
   }
 
   function renderResourceSidebar() {
     const hdr = $(".sidebar-header");
-    hdr.innerHTML = `<span class="col-name" data-col="0">Resource<span class="col-resize-handle"></span></span><span class="col-resource" data-col="1">Role<span class="col-resize-handle"></span></span><span class="col-dates" data-col="2">Tasks<span class="col-resize-handle"></span></span><span class="col-dates" data-col="3">Peak</span>`;
+    hdr.innerHTML = `<span class="col-name" data-col="0">Resource<span class="col-resize-handle"></span></span><span class="col-resource" data-col="1">Role<span class="col-resize-handle"></span></span><span class="col-dates" data-col="2">Assign.<span class="col-resize-handle"></span></span><span class="col-dates" data-col="3">Peak</span>`;
     const body = $("#sidebar-body");
     body.innerHTML = "";
-    for (const rv of resViewRows) {
+    for (let idx = 0; idx < resViewRows.length; idx++) {
+      const rv = resViewRows[idx];
       const r = rv.resource;
       const overloaded = rv.peakUtil > 100;
       const row = document.createElement("div");
       row.className = "sidebar-row" + (overloaded ? " overload-row" : "");
+      row.dataset.rowIdx = idx;
+      if (rv._rowH && rv._rowH !== ROW_H) {
+        row.style.height = rv._rowH + "px";
+      }
       const peakLabel = rv.peakUtil > 0 ? rv.peakUtil + "%" : "\u2014";
+      const roles = [...new Set(rv.assignments.map(a => a.role).filter(Boolean))];
+      const roleStr = roles.length ? roles.join(", ") : r.role || "\u2014";
       row.innerHTML = `
         <span class="col-name">
           <span class="task-dot" style="background:${r.color}"></span>
           ${esc(r.name)}
         </span>
-        <span class="col-resource">${esc(r.role || "\u2014")}</span>
-        <span class="col-dates">${rv.tasks.length}</span>
+        <span class="col-resource" title="${esc(roleStr)}">${esc(roleStr)}</span>
+        <span class="col-dates">${rv.assignments.length}</span>
         <span class="col-dates" ${overloaded ? 'style="color:var(--danger);font-weight:600"' : ""}>${peakLabel}</span>`;
+      row.addEventListener("click", () => openResourceModal(r, false));
+      row.addEventListener("mouseenter", () => setHoveredRow(idx));
+      row.addEventListener("mouseleave", () => setHoveredRow(-1));
       body.appendChild(row);
     }
   }
@@ -457,7 +487,7 @@
       const w = Math.max(x2 - x1, 8);
 
       const barLabel = sidebarCollapsed && t.resources && t.resources.length
-        ? t.name + " \u2014 " + t.resources.map((r) => r.name).join(", ")
+        ? t.name + " \u2014 " + t.resources.map((r) => r.role ? `${r.name} [${r.role}]` : r.name).join(", ")
         : t.name;
       drawBar(ctx, x1, y, w, t.color, t.progress, barLabel);
 
@@ -505,11 +535,48 @@
     resizeSvg(totalW, totalH);
   }
 
+  function computeResRowLayout() {
+    const minBarH = Math.max(14, BAR_H * 0.6);
+    resRowOffsets = [0];
+    for (let ri = 0; ri < resViewRows.length; ri++) {
+      const rv = resViewRows[ri];
+      const asns = rv.assignments;
+
+      const lanes = new Array(asns.length).fill(0);
+      let maxLane = 0;
+      for (let i = 0; i < asns.length; i++) {
+        const si = parseLocal(asns[i].task.start_date).getTime();
+        const ei = parseLocal(asns[i].task.end_date).getTime();
+        const usedLanes = new Set();
+        for (let j = 0; j < i; j++) {
+          const sj = parseLocal(asns[j].task.start_date).getTime();
+          const ej = parseLocal(asns[j].task.end_date).getTime();
+          if (si <= ej && ei >= sj) usedLanes.add(lanes[j]);
+        }
+        let lane = 0;
+        while (usedLanes.has(lane)) lane++;
+        lanes[i] = lane;
+        if (lane > maxLane) maxLane = lane;
+      }
+
+      const laneCount = maxLane + 1;
+      const rowH = Math.max(ROW_H, laneCount * (minBarH + 2) + BAR_PAD * 2);
+      rv._lanes = lanes;
+      rv._laneCount = laneCount;
+      rv._rowH = rowH;
+      rv._laneH = (rowH - BAR_PAD * 2) / laneCount;
+      resRowOffsets.push(resRowOffsets[ri] + rowH);
+    }
+  }
+
+  let resRowOffsets = [];
+
   function renderResourceBars() {
     const z = ZOOM_LEVELS[zoomIdx];
     const canvas = $("#gantt-canvas");
     let totalW = timeCols * z.colW;
-    const totalH = resViewRows.length * ROW_H;
+
+    const totalH = resRowOffsets[resRowOffsets.length - 1] || 0;
 
     for (const t of tasks) {
       const barEnd = dateToPx(t.end_date) + oneDayPx() + 20;
@@ -524,40 +591,62 @@
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, totalW, totalH);
 
-    drawGrid(ctx, totalW, totalH, z, resViewRows.length);
+    drawGridVariable(ctx, totalW, totalH, z);
     drawToday(ctx, totalW, totalH, z);
 
     for (let ri = 0; ri < resViewRows.length; ri++) {
       const rv = resViewRows[ri];
-      const rowY = ri * ROW_H;
-      for (const t of rv.tasks) {
+      const rowY = resRowOffsets[ri];
+      const asns = rv.assignments;
+      const laneH = rv._laneH;
+      const gap = rv._laneCount > 1 ? 1 : 0;
+
+      for (let i = 0; i < asns.length; i++) {
+        const a = asns[i];
+        const t = a.task;
         const x1 = dateToPx(t.start_date);
         const x2 = dateToPx(t.end_date) + oneDayPx();
         const w = Math.max(x2 - x1, 8);
-        const y = rowY + BAR_PAD;
-        drawBar(ctx, x1, y, w, t.color, t.progress, t.name);
+        const barH = laneH - gap;
+        const y = rowY + BAR_PAD + rv._lanes[i] * laneH;
+        const label = a.role ? `${t.name} [${a.role}]` : t.name;
+        drawBar(ctx, x1, y, w, t.color, t.progress, label, barH);
       }
     }
 
     resizeSvg(totalW, totalH);
   }
 
+  function drawGridVariable(ctx, totalW, totalH, z) {
+    const border = cssVar("--border") || "#1a4080";
+    ctx.strokeStyle = border + "30";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= timeCols; i++) {
+      const x = i * z.colW;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, totalH); ctx.stroke();
+    }
+    for (let i = 0; i <= resViewRows.length; i++) {
+      const y = resRowOffsets[i] || totalH;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(totalW, y); ctx.stroke();
+    }
+  }
+
   function renderResourceOverlaps() {
     const svg = $("#dep-svg");
     svg.innerHTML = "";
-    const z = ZOOM_LEVELS[zoomIdx];
 
     for (let ri = 0; ri < resViewRows.length; ri++) {
       const rv = resViewRows[ri];
+      const rowY = resRowOffsets[ri];
+      const rowH = rv._rowH;
       for (const span of rv.overloaded) {
         const x1 = timeToPx(span.start);
         const x2 = timeToPx(span.end) + oneDayPx();
-        const y = ri * ROW_H;
         const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
         rect.setAttribute("x", x1);
-        rect.setAttribute("y", y);
+        rect.setAttribute("y", rowY);
         rect.setAttribute("width", Math.max(x2 - x1, 4));
-        rect.setAttribute("height", ROW_H);
+        rect.setAttribute("height", rowH);
         const danger = cssVar("--danger") || "#e74c3c";
         rect.setAttribute("fill", danger + "33");
         rect.setAttribute("stroke", danger + "88");
@@ -565,10 +654,9 @@
         rect.setAttribute("rx", "3");
         svg.appendChild(rect);
 
-        // Show peak % label in the overloaded zone
         const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
         txt.setAttribute("x", x1 + 4);
-        txt.setAttribute("y", y + ROW_H - 4);
+        txt.setAttribute("y", rowY + rowH - 4);
         txt.setAttribute("fill", danger + "cc");
         txt.setAttribute("font-size", "9");
         txt.setAttribute("font-family", "-apple-system, sans-serif");
@@ -611,25 +699,26 @@
     }
   }
 
-  function drawBar(ctx, x, y, w, color, progress, label) {
+  function drawBar(ctx, x, y, w, color, progress, label, h) {
+    const barH = h || BAR_H;
     ctx.fillStyle = color + "55";
-    ctx.beginPath(); roundRect(ctx, x, y, w, BAR_H, 4); ctx.fill();
+    ctx.beginPath(); roundRect(ctx, x, y, w, barH, 4); ctx.fill();
     if (progress > 0) {
       ctx.fillStyle = color + "cc";
-      ctx.beginPath(); roundRect(ctx, x, y, (w * progress) / 100, BAR_H, 4); ctx.fill();
+      ctx.beginPath(); roundRect(ctx, x, y, (w * progress) / 100, barH, 4); ctx.fill();
     }
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
-    ctx.beginPath(); roundRect(ctx, x, y, w, BAR_H, 4); ctx.stroke();
+    ctx.beginPath(); roundRect(ctx, x, y, w, barH, 4); ctx.stroke();
     ctx.fillStyle = lightMode ? "#1e1e1e" : "#fff";
-    const fontSize = Math.max(10, Math.min(BAR_H * 0.5, 16));
+    const fontSize = Math.max(8, Math.min(barH * 0.6, 16));
     ctx.font = `${fontSize}px -apple-system, sans-serif`;
     ctx.textBaseline = "middle";
     const maxTextW = w - 8;
-    if (maxTextW > 20) {
+    if (maxTextW > 20 && barH >= 10) {
       ctx.save();
-      ctx.beginPath(); ctx.rect(x + 4, y, maxTextW, BAR_H); ctx.clip();
-      ctx.fillText(label, x + 6, y + BAR_H / 2);
+      ctx.beginPath(); ctx.rect(x + 4, y, maxTextW, barH); ctx.clip();
+      ctx.fillText(label, x + 6, y + barH / 2);
       ctx.restore();
     }
   }
@@ -768,10 +857,22 @@
         lastHover = hoverKey;
         if (viewMode === "tasks") { renderBars(hit); renderDeps(); }
       }
+      // Row highlight from canvas
+      let rowIdx = -1;
+      if (viewMode === "tasks") {
+        rowIdx = Math.floor(my / ROW_H);
+        if (rowIdx >= tasks.length) rowIdx = -1;
+      } else {
+        for (let i = 0; i < resRowOffsets.length - 1; i++) {
+          if (my >= resRowOffsets[i] && my < resRowOffsets[i + 1]) { rowIdx = i; break; }
+        }
+      }
+      setHoveredRow(rowIdx);
     });
     canvas.addEventListener("mouseleave", () => {
       if (dragTask) return;
       lastHover = null;
+      setHoveredRow(-1);
       hoveredTaskIdx = -1;
       canvas.style.cursor = "default";
       if (viewMode === "tasks") { renderBars(null); renderDeps(); }
@@ -897,6 +998,38 @@
   const CONNECTOR_R = 7;
 
   let hoveredTaskIdx = -1;
+  let hoveredRowIdx = -1;
+
+  function setHoveredRow(idx) {
+    if (idx === hoveredRowIdx) return;
+    hoveredRowIdx = idx;
+    const rows = $("#sidebar-body").querySelectorAll(".sidebar-row");
+    rows.forEach((r, i) => r.classList.toggle("row-highlight", i === idx));
+    drawRowHighlight();
+  }
+
+  function drawRowHighlight() {
+    const overlay = $("#row-highlight-overlay");
+    if (!overlay) return;
+    const canvas = $("#gantt-canvas");
+    overlay.width = canvas.width;
+    overlay.height = canvas.height;
+    overlay.style.width = canvas.style.width;
+    overlay.style.height = canvas.style.height;
+    const ctx = overlay.getContext("2d");
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    if (hoveredRowIdx < 0) return;
+    const accent = cssVar("--accent") || "#4a86c8";
+    ctx.fillStyle = accent + "18";
+    if (viewMode === "tasks") {
+      const y = hoveredRowIdx * ROW_H;
+      ctx.fillRect(0, y, canvas.width, ROW_H);
+    } else if (resRowOffsets.length > hoveredRowIdx) {
+      const y = resRowOffsets[hoveredRowIdx];
+      const h = (resViewRows[hoveredRowIdx] && resViewRows[hoveredRowIdx]._rowH) || ROW_H;
+      ctx.fillRect(0, y, canvas.width, h);
+    }
+  }
 
   function connectorHitTest(mx, my) {
     if (hoveredTaskIdx < 0 || hoveredTaskIdx >= tasks.length) return null;
@@ -1055,6 +1188,48 @@
 
   // ── Modals ────────────────────────────────────────────
 
+  function addAssignmentRow(container, resId, role, allocation) {
+    const r = resources.find((r) => r.id === resId);
+    if (!r) return;
+    const row = document.createElement("label");
+    row.className = "rc-assignment-row";
+    row.dataset.resId = resId;
+    const roleVal = role && role !== r.role ? role : "";
+    row.innerHTML = `
+      <span class="rc-dot" style="background:${r.color}"></span>
+      <span class="rc-name">${esc(r.name)}</span>
+      <input type="text" class="rc-role" value="${esc(roleVal)}" placeholder="${esc(r.role || "Role")}" title="Role for this assignment">
+      <input type="number" class="rc-alloc" min="1" max="100" value="${allocation}" title="Allocation %">
+      <span class="rc-pct">%</span>
+      <button type="button" class="btn btn-ghost btn-icon rc-remove" title="Remove">&times;</button>`;
+    row.querySelector(".rc-remove").addEventListener("click", () => { row.remove(); });
+    // Insert before the adder row
+    const adder = container.querySelector(".rc-adder");
+    if (adder) container.insertBefore(row, adder);
+    else container.appendChild(row);
+  }
+
+  function addAssignmentAdder(container) {
+    const adder = document.createElement("div");
+    adder.className = "rc-adder";
+    const sel = document.createElement("select");
+    sel.className = "rc-add-select";
+    sel.innerHTML = '<option value="">+ Add resource...</option>';
+    for (const r of resources) {
+      const opt = document.createElement("option");
+      opt.value = r.id;
+      opt.textContent = r.name + (r.role ? ` (${r.role})` : "");
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", () => {
+      if (!sel.value) return;
+      addAssignmentRow(container, parseInt(sel.value), "", 100);
+      sel.value = "";
+    });
+    adder.appendChild(sel);
+    container.appendChild(adder);
+  }
+
   function openTaskModal(t) {
     $("#task-modal-title").textContent = t ? "Edit Task" : "New Task";
     $("#task-id").value = t ? t.id : "";
@@ -1066,21 +1241,14 @@
     $("#task-color").value = t ? t.color : "#4a86c8";
     $("#btn-task-delete").style.display = t ? "block" : "none";
 
-    // Resource checklist with allocation %
+    // Resource assignments (supports same resource multiple times with different roles)
     const cl = $("#task-resources");
     cl.innerHTML = "";
-    const resMap = {};
-    if (t && t.resources) t.resources.forEach((r) => { resMap[r.id] = r.allocation; });
-    for (const r of resources) {
-      const checked = t ? (t.resource_ids || []).includes(r.id) : false;
-      const alloc = resMap[r.id] !== undefined ? resMap[r.id] : 100;
-      const lbl = document.createElement("label");
-      lbl.innerHTML = `<input type="checkbox" value="${r.id}" ${checked ? "checked" : ""}>
-        <span class="rc-dot" style="background:${r.color}"></span>${esc(r.name)}
-        <input type="number" class="rc-alloc" min="1" max="100" value="${alloc}" title="Allocation %">
-        <span class="rc-pct">%</span>`;
-      cl.appendChild(lbl);
+    const assignments = t ? (t.resources || []) : [];
+    for (const a of assignments) {
+      addAssignmentRow(cl, a.id, a.role || "", a.allocation);
     }
+    addAssignmentAdder(cl);
 
     const projSel = $("#task-project");
     projSel.innerHTML = '<option value="">\u2014 none \u2014</option>';
@@ -1242,6 +1410,7 @@
         <span class="resource-list-name">${esc(p.name)}</span>
         <span class="resource-list-role">${taskCount} task${taskCount !== 1 ? "s" : ""}</span>
         <span class="resource-list-actions">
+          <button class="btn btn-ghost btn-icon btn-proj-export" data-id="${p.id}" title="Export">&#8681;</button>
           <button class="btn btn-ghost btn-icon btn-proj-edit" data-id="${p.id}" title="Edit">&#9998;</button>
           <button class="btn btn-ghost btn-icon btn-proj-del" data-id="${p.id}" title="Delete">&times;</button>
         </span>`;
@@ -1265,6 +1434,20 @@
           await loadAll();
           renderProjectList();
         }
+      });
+    });
+    body.querySelectorAll(".btn-proj-export").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const pid = parseInt(btn.dataset.id);
+        const data = await api(`/api/projects/${pid}/export`);
+        const p = projects.find((p) => p.id === pid);
+        const filename = (p ? p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "project") + ".json";
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const link = document.createElement("a");
+        link.download = filename;
+        link.href = URL.createObjectURL(blob);
+        link.click();
+        URL.revokeObjectURL(link.href);
       });
     });
     updateProjDeleteSelectedBtn();
@@ -1652,10 +1835,12 @@
       const id = $("#task-id").value;
       const color = $("#task-color").value;
       saveRecentColor(color);
-      const resourceIds = Array.from($("#task-resources").querySelectorAll("input[type=checkbox]:checked"))
-        .map((cb) => {
-          const allocInput = cb.closest("label").querySelector(".rc-alloc");
-          return { id: parseInt(cb.value), allocation: parseInt(allocInput.value) || 100 };
+      const resourceIds = Array.from($("#task-resources").querySelectorAll(".rc-assignment-row"))
+        .map((row) => {
+          const entry = { id: parseInt(row.dataset.resId), allocation: parseInt(row.querySelector(".rc-alloc").value) || 100 };
+          const roleVal = row.querySelector(".rc-role").value.trim();
+          if (roleVal) entry.role = roleVal;
+          return entry;
         });
       const data = {
         name: $("#task-name").value,
@@ -1772,6 +1957,23 @@
       renderProjectList();
     });
     $("#btn-proj-list-close").addEventListener("click", () => { $("#project-list-modal").classList.remove("open"); });
+    $("#btn-proj-import").addEventListener("click", () => { $("#import-file-input").click(); });
+    $("#import-file-input").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const result = await api("/api/projects/import", "POST", data);
+        if (result && result.error) { alert(result.error); return; }
+        currentProjectId = result.id;
+        await loadAll();
+        renderProjectList();
+      } catch (err) {
+        alert("Failed to import: " + err.message);
+      }
+      e.target.value = "";
+    });
 
     // Settings form
     $("#settings-form").addEventListener("submit", async (e) => {
@@ -1995,6 +2197,8 @@
       if (newW < 120) newW = 120;
       if (newW > window.innerWidth * 0.7) newW = window.innerWidth * 0.7;
       sidebarWidth = newW;
+      colWidths = null;
+      clearColInlineStyles();
       applySidebarWidth();
     });
     window.addEventListener("mouseup", () => {
@@ -2037,20 +2241,36 @@
 
   function applyColWidths() {
     if (!colWidths) return;
+    const last = colWidths.length - 1;
     const headerSpans = Array.from($("#sidebar-header").children);
     headerSpans.forEach((s, i) => {
-      s.style.flex = "none";
-      s.style.width = colWidths[i] + "px";
+      if (i < last) {
+        s.style.flex = "none";
+        s.style.width = colWidths[i] + "px";
+      } else {
+        s.style.flex = "1";
+        s.style.width = "";
+      }
     });
-    // Apply to all body rows
     $("#sidebar-body").querySelectorAll(".sidebar-row").forEach((row) => {
       const spans = Array.from(row.children);
       spans.forEach((s, i) => {
-        if (i < colWidths.length) {
+        if (i < last) {
           s.style.flex = "none";
           s.style.width = colWidths[i] + "px";
+        } else if (i === last) {
+          s.style.flex = "1";
+          s.style.width = "";
         }
       });
+    });
+  }
+
+  function clearColInlineStyles() {
+    const headerSpans = Array.from($("#sidebar-header").children);
+    headerSpans.forEach((s) => { s.style.flex = ""; s.style.width = ""; });
+    $("#sidebar-body").querySelectorAll(".sidebar-row").forEach((row) => {
+      Array.from(row.children).forEach((s) => { s.style.flex = ""; s.style.width = ""; });
     });
   }
 

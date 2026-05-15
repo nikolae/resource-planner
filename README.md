@@ -32,7 +32,10 @@ A Python/Flask web application for multi-project resource planning with an inter
 ### Resource Timeline View
 - Toggle between **Tasks** and **Resources** views via buttons in the header
 - Resource view shows one row per resource with all their assigned task bars
-- Sidebar displays resource name, role, task count, and **peak utilization %**
+- **Per-assignment bars** — if a resource has multiple roles on the same task (e.g., PM and IC), each assignment renders as a separate bar with the role in the label (e.g., "Task Name [PM]")
+- **Lane stacking** — overlapping assignments are stacked vertically into lanes within the row; row height expands dynamically to fit all lanes at a legible size
+- Sidebar displays resource name, **all unique assigned roles** (not just the default), assignment count, and **peak utilization %**
+- **Click a resource row** in the sidebar to open the edit resource modal directly
 - **Overload detection** based on summed allocation percentages per day (not simple overlap)
   - Two tasks at 50% each = 100% utilization = no overload
   - Two tasks at 80% each = 160% = overloaded
@@ -41,9 +44,10 @@ A Python/Flask web application for multi-project resource planning with an inter
 
 ### Sidebar Panel
 - **Collapsible** — toggle button (arrow) hides/shows the sidebar; when collapsed, task bars display resource names inline
-- **Resizable width** — drag the handle between the sidebar and chart to adjust (min 120px, max 70% of window)
-- **Resizable columns** — drag column header borders to adjust individual column widths
+- **Resizable width** — drag the handle between the sidebar and chart to adjust (min 120px, max 70% of window); columns reflow dynamically as width changes
+- **Resizable columns** — drag column header borders to adjust individual column widths; the last column always flexes to fill remaining space
 - Column widths reset when switching between Tasks and Resources views
+- **Cross-panel row highlighting** — hovering a sidebar row or chart row highlights the full row across both panels with a subtle accent band
 
 ### Projects
 - Create, edit, and delete projects
@@ -52,6 +56,8 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Project selector dropdown in the header to filter the Gantt view to a single project
 - "All Projects" view to see everything at once
 - Deleting a project removes all its tasks, assignments, and dependencies
+- **Export** — download any project as a self-contained JSON file (includes tasks, resources, assignments, dependencies with relative references)
+- **Import** — upload a previously exported JSON file to recreate a project; existing resources are matched by name to avoid duplicates
 - Demo data seeds two sample projects: "Website Redesign" and "Mobile App"
 
 ### Tasks
@@ -148,6 +154,31 @@ python app.py
 
 Open http://localhost:5000 in your browser.
 
+## Docker
+
+Build and run with Docker Compose:
+
+```bash
+cd resource-planner
+docker compose up --build
+```
+
+Open http://localhost:5000 in your browser.
+
+The SQLite database is stored in a named volume (`planner-data`) so data persists across container restarts. `config.json` is bind-mounted from the host for easy editing.
+
+To run in the background:
+
+```bash
+docker compose up -d --build
+```
+
+To stop:
+
+```bash
+docker compose down
+```
+
 ## Configuration
 
 Server settings are stored in `config.json` in the project root:
@@ -182,10 +213,13 @@ resource-planner/
   models.py           SQLAlchemy models (Project, Task, TaskResource, Resource, Dependency)
   config.json         Server and database configuration
   requirements.txt    Python dependencies
+  Dockerfile          Container image definition
+  docker-compose.yml  Docker Compose service configuration
+  .dockerignore       Files excluded from Docker build context
   templates/
     index.html        Single-page web UI
   static/
-    css/style.css     Dark-themed styling
+    css/style.css     Themed styling (supports custom themes)
     js/app.js         Gantt chart rendering, drag handling, dependency linking, UI logic
   instance/
     planner.db        SQLite database (created on first run)
@@ -226,14 +260,20 @@ All endpoints accept and return JSON.
 
 ### Projects
 
-| Method | Endpoint              | Description          |
-|--------|-----------------------|----------------------|
-| GET    | `/api/projects`       | List all projects    |
-| POST   | `/api/projects`       | Create a project     |
-| PUT    | `/api/projects/<id>`  | Update a project     |
-| DELETE | `/api/projects/<id>`  | Delete a project     |
+| Method | Endpoint                      | Description                      |
+|--------|-------------------------------|----------------------------------|
+| GET    | `/api/projects`               | List all projects                |
+| POST   | `/api/projects`               | Create a project                 |
+| PUT    | `/api/projects/<id>`          | Update a project                 |
+| DELETE | `/api/projects/<id>`          | Delete a project                 |
+| GET    | `/api/projects/<id>/export`   | Export project as JSON bundle    |
+| POST   | `/api/projects/import`        | Import project from JSON bundle  |
 
 **Project fields:** `name` (string, required), `description` (string), `color` (hex string)
+
+**Export format:** JSON object with `version`, `project`, `resources`, `tasks`, `assignments`, `dependencies` — all references use local indices rather than database IDs, making the file portable.
+
+**Import behavior:** Creates the project and its tasks. Resources are matched by name — if a resource with the same name already exists, it is reused rather than duplicated.
 
 ### Tasks
 
