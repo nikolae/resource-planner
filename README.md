@@ -111,6 +111,7 @@ A Python/Flask web application for multi-project resource planning with an inter
 
 ### Export (PNG / PDF)
 - Click **Export** in the header to open the export modal with PNG and PDF options
+- **Timestamped filenames** — all exports (PNG, PDF, and project JSON) include the project name, view mode, and date/time (e.g. `export-staffing-tasks-20260518-1430.png`)
 - Composites sidebar (columns, header, rows), date header, task bars, dependency arrows, and overlays into a single image
 - **2x resolution rendering** — all text, bars, and lines are re-rendered at high DPI for crisp output
 - **Alternating row stripes** — odd rows have a subtle background tint for easier visual tracking in exported images

@@ -1813,7 +1813,7 @@
         const pid = parseInt(btn.dataset.id);
         const data = await api(`/api/projects/${pid}/export`);
         const p = projects.find((p) => p.id === pid);
-        const filename = (p ? p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "project") + ".json";
+        const now = new Date(); const stamp = now.getFullYear() + String(now.getMonth() + 1).padStart(2, "0") + String(now.getDate()).padStart(2, "0") + "-" + String(now.getHours()).padStart(2, "0") + String(now.getMinutes()).padStart(2, "0"); const filename = (p ? p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "project") + `-${stamp}.json`;
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
         const link = document.createElement("a");
         link.download = filename;
@@ -2226,7 +2226,9 @@
   function exportFilename(ext) {
     const p = projects.find((p) => p.id === currentProjectId);
     const proj = p ? p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "all-projects";
-    return `export-${proj}-${viewMode}.${ext}`;
+    const now = new Date();
+    const stamp = now.getFullYear() + String(now.getMonth() + 1).padStart(2, "0") + String(now.getDate()).padStart(2, "0") + "-" + String(now.getHours()).padStart(2, "0") + String(now.getMinutes()).padStart(2, "0");
+    return `export-${proj}-${viewMode}-${stamp}.${ext}`;
   }
 
   function exportPNG() {
@@ -2339,7 +2341,7 @@
       if (!currentProjectId) return;
       const data = await api(`/api/projects/${currentProjectId}/export`);
       const p = projects.find((p) => p.id === currentProjectId);
-      const filename = (p ? p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "project") + ".json";
+      const now = new Date(); const stamp = now.getFullYear() + String(now.getMonth() + 1).padStart(2, "0") + String(now.getDate()).padStart(2, "0") + "-" + String(now.getHours()).padStart(2, "0") + String(now.getMinutes()).padStart(2, "0"); const filename = (p ? p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "project") + `-${stamp}.json`;
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const link = document.createElement("a");
       link.download = filename;
