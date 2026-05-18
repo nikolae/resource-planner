@@ -44,6 +44,11 @@
         <span id="vzoom-label">M</span>
         <button id="btn-vzoom-in" class="btn btn-ghost btn-icon" title="Taller rows">&uarr;</button>
       </div>
+      <div class="zoom-controls" title="Font size">
+        <button id="btn-font-down" class="btn btn-ghost btn-icon" title="Smaller font">A&minus;</button>
+        <span id="font-label">M</span>
+        <button id="btn-font-up" class="btn btn-ghost btn-icon" title="Larger font">A+</button>
+      </div>
     </div>
   </header>
 
@@ -67,6 +72,7 @@
           <canvas id="row-highlight-overlay"></canvas>
           <svg id="dep-svg"></svg>
           <svg id="link-svg"></svg>
+          <div id="util-tooltip" class="util-tooltip"></div>
         </div>
       </div>
     </div>
@@ -309,15 +315,18 @@
         <div class="help-section">
           <h3>Projects</h3>
           <p>Use the <strong>dropdown</strong> in the top-left to switch projects or view all at once. Click <strong>+</strong> to create a new project, or the <strong>hamburger icon</strong> to manage and batch-delete projects.</p>
+          <p>Use the <strong>&darr;</strong> and <strong>&uarr;</strong> icons next to the project selector to <strong>export</strong> and <strong>import</strong> projects as portable JSON files.</p>
         </div>
         <div class="help-section">
           <h3>Tasks</h3>
           <p>Click <strong>+ Task</strong> to create one. Assign resources, set dates, pick a color, and group under a parent task. Click a task in the <strong>sidebar</strong> or <strong>double-click its bar</strong> on the chart to edit. Right-click a bar for a context menu.</p>
+          <p><strong>Unstaffed tasks</strong> (no resources assigned) are rendered with diagonal hatching and a dashed red border so they stand out visually.</p>
+          <p><strong>Drag sidebar rows</strong> vertically to reorder tasks; the order is persisted.</p>
         </div>
         <div class="help-section">
           <h3>Gantt Chart</h3>
           <p><strong>Drag</strong> a bar to move it. <strong>Drag the edges</strong> to resize (cursor changes to indicate). The chart auto-expands when you drag past the visible range.</p>
-          <p>Use the <strong>horizontal zoom</strong> (Day / 3-Day / Week / 2-Week / Month) and <strong>vertical zoom</strong> (XS&ndash;XL) controls to adjust the view.</p>
+          <p>Use the <strong>horizontal zoom</strong> (Day / 3-Day / Week / 2-Week / Month), <strong>vertical zoom</strong> (XS&ndash;XXL), and <strong>font size</strong> (XS&ndash;XL) controls to adjust the view. Font size scales sidebar text, date headers, buttons, and modals independently of row height.</p>
         </div>
         <div class="help-section">
           <h3>Dependencies</h3>
@@ -329,6 +338,8 @@
           <p>Click <strong>Resources</strong> to manage the resource list. Assign multiple resources per task with <strong>allocation percentages</strong> (e.g., a PM at 10%, an engineer at 80%).</p>
           <p>The same resource can be assigned to a task <strong>multiple times with different roles</strong> (e.g., Alice as both PM and IC on the same task).</p>
           <p>Switch to <strong>Resources view</strong> to see one row per resource with all their assignments. Overlapping assignments are <strong>stacked into lanes</strong> so bars don't overlap. Bar labels show the role (e.g., "Task [PM]"). Red overlays flag periods where a resource exceeds 100% utilization.</p>
+          <p>A <strong>utilization sparkline</strong> at the bottom of each resource row shows a step chart of total allocation over time. Reference lines at 50% and 100% provide scale; per-segment % labels are shown on the chart. Gaps between assignments step to zero. <strong>Hover</strong> the chart area to see the exact utilization percentage for any day.</p>
+          <p><strong>Drag resource rows</strong> vertically to reorder them; the order is persisted.</p>
           <p><strong>Click a resource row</strong> in the sidebar to edit it directly.</p>
         </div>
         <div class="help-section">
@@ -340,11 +351,11 @@
           <h3>Themes &amp; Export</h3>
           <p>Click the <strong>palette icon</strong> to browse, create, edit, or duplicate themes with full color customization.</p>
           <p>Use <strong>Export Themes</strong> / <strong>Import Themes</strong> in the theme manager to share custom themes between browsers or team members.</p>
-          <p>Click <strong>Export PNG</strong> to download the current view as an image for Confluence, slides, or email.</p>
+          <p>Click <strong>Export</strong> to download the current view as PNG or PDF. Filenames include the project name, view mode, and timestamp. Exports render at 2x resolution with alternating row stripes for readability.</p>
         </div>
         <div class="help-section">
           <h3>Undo / Redo</h3>
-          <p>Most actions in the task view can be undone and redone. This includes dragging, editing, creating, and deleting tasks and dependencies.</p>
+          <p>Most actions can be undone and redone, including dragging, editing, creating, and deleting tasks and dependencies. Use the <strong>undo/redo buttons</strong> in the header or keyboard shortcuts.</p>
         </div>
         <div class="help-section">
           <h3>Keyboard Shortcuts</h3>

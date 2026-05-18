@@ -2,17 +2,33 @@
   "use strict";
 
   const V_ZOOM_LEVELS = [
-    { name: "XS", rowH: 24, barH: 16 },
-    { name: "S",  rowH: 30, barH: 18 },
-    { name: "M",  rowH: 36, barH: 22 },
-    { name: "L",  rowH: 48, barH: 32 },
-    { name: "XL", rowH: 64, barH: 46 },
+    { name: "XS",  rowH: 24, barH: 16 },
+    { name: "S",   rowH: 30, barH: 18 },
+    { name: "M",   rowH: 36, barH: 22 },
+    { name: "L",   rowH: 48, barH: 32 },
+    { name: "XL",  rowH: 64, barH: 46 },
+    { name: "XXL", rowH: 84, barH: 62 },
   ];
   let vZoomIdx = 2;
   let ROW_H = 36;
   let BAR_H = 22;
   let BAR_PAD = (ROW_H - BAR_H) / 2;
   const EDGE = 8;
+
+  const FONT_LEVELS = [
+    { name: "XS", scale: 0.75 },
+    { name: "S",  scale: 0.85 },
+    { name: "M",  scale: 1.0 },
+    { name: "L",  scale: 1.15 },
+    { name: "XL", scale: 1.3 },
+  ];
+  let fontIdx = 2;
+
+  function applyFontZoom() {
+    const fl = FONT_LEVELS[fontIdx];
+    document.documentElement.style.setProperty("--font-scale", fl.scale);
+    $("#font-label").textContent = fl.name;
+  }
 
   function applyVZoom() {
     const vz = V_ZOOM_LEVELS[vZoomIdx];
@@ -487,12 +503,14 @@
       const dayUtil = {};
       let peakUtil = 0;
       for (const { task: t, allocation } of taskAllocs) {
-        let d = parseLocal(t.start_date).getTime();
-        const end = parseLocal(t.end_date).getTime();
-        while (d <= end) {
-          dayUtil[d] = (dayUtil[d] || 0) + allocation;
-          if (dayUtil[d] > peakUtil) peakUtil = dayUtil[d];
-          d += DAY_MS;
+        const startD = parseLocal(t.start_date);
+        const endD = parseLocal(t.end_date);
+        const cur = new Date(startD.getFullYear(), startD.getMonth(), startD.getDate());
+        while (cur <= endD) {
+          const key = cur.getTime();
+          dayUtil[key] = (dayUtil[key] || 0) + allocation;
+          if (dayUtil[key] > peakUtil) peakUtil = dayUtil[key];
+          cur.setDate(cur.getDate() + 1);
         }
       }
 
@@ -500,12 +518,13 @@
       const overloaded = [];
       const days = Object.keys(dayUtil).map(Number).sort((a, b) => a - b);
       let spanStart = null;
-      for (const day of days) {
+      for (let di = 0; di < days.length; di++) {
+        const day = days[di];
         if (dayUtil[day] > 100) {
           if (spanStart === null) spanStart = day;
         } else {
           if (spanStart !== null) {
-            overloaded.push({ start: spanStart, end: day - DAY_MS, util: 0 });
+            overloaded.push({ start: spanStart, end: days[di - 1], util: 0 });
             spanStart = null;
           }
         }
@@ -516,13 +535,13 @@
       // Annotate each span with peak util in that range
       for (const span of overloaded) {
         let peak = 0;
-        for (let d = span.start; d <= span.end; d += DAY_MS) {
-          if (dayUtil[d] > peak) peak = dayUtil[d];
+        for (const d of days) {
+          if (d >= span.start && d <= span.end && dayUtil[d] > peak) peak = dayUtil[d];
         }
         span.util = peak;
       }
 
-      resViewRows.push({ resource: r, tasks: rTasks, assignments, taskAllocs, overloaded, peakUtil });
+      resViewRows.push({ resource: r, tasks: rTasks, assignments, taskAllocs, overloaded, peakUtil, dayUtil });
     }
   }
 
@@ -858,6 +877,8 @@
     resizeSvg(totalW, totalH);
   }
 
+  const UTIL_CHART_H = 28;
+
   function computeResRowLayout() {
     const minBarH = Math.max(14, BAR_H * 0.6);
     resRowOffsets = [0];
@@ -883,11 +904,14 @@
       }
 
       const laneCount = maxLane + 1;
-      const rowH = Math.max(ROW_H, laneCount * (minBarH + 2) + BAR_PAD * 2);
+      const hasUtil = Object.keys(rv.dayUtil).length > 0;
+      const utilH = hasUtil ? UTIL_CHART_H : 0;
+      const rowH = Math.max(ROW_H, laneCount * (minBarH + 2) + BAR_PAD * 2) + utilH;
       rv._lanes = lanes;
       rv._laneCount = laneCount;
       rv._rowH = rowH;
-      rv._laneH = (rowH - BAR_PAD * 2) / laneCount;
+      rv._utilH = utilH;
+      rv._laneH = (rowH - BAR_PAD * 2 - utilH) / laneCount;
       resRowOffsets.push(resRowOffsets[ri] + rowH);
     }
   }
@@ -936,9 +960,133 @@
         const label = t.name + meta;
         drawBar(ctx, x1, y, w, t.color, t.progress, label, barH);
       }
+
+      // Utilization sparkline at bottom of row
+      if (rv._utilH > 0) {
+        drawUtilChart(ctx, rv, rowY + rv._rowH - rv._utilH, rv._utilH, totalW);
+      }
     }
 
     resizeSvg(totalW, totalH);
+  }
+
+  function drawUtilChart(ctx, rv, chartY, chartH, totalW) {
+    const dayUtil = rv.dayUtil;
+    const days = Object.keys(dayUtil).map(Number).sort((a, b) => a - b);
+    if (days.length === 0) return;
+
+    const dangerColor = cssVar("--danger") || "#e74c3c";
+    const accentColor = cssVar("--accent") || "#4a86c8";
+    const borderColor = cssVar("--border") || "#1a4080";
+    const dimColor = cssVar("--text-dim") || "#8899aa";
+    const DAY_MS = 86400000;
+
+    const maxVis = Math.max(100, rv.peakUtil, 150);
+
+    // Reference lines at 50% and 100%
+    const ref100Y = chartY + chartH * (1 - 100 / maxVis);
+    const ref50Y = chartY + chartH * (1 - 50 / maxVis);
+    ctx.strokeStyle = borderColor + "40";
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.moveTo(0, ref50Y); ctx.lineTo(totalW, ref50Y);
+    ctx.stroke();
+    ctx.strokeStyle = borderColor + "80";
+    ctx.beginPath();
+    ctx.moveTo(0, ref100Y); ctx.lineTo(totalW, ref100Y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Scale labels on left edge
+    ctx.font = "8px -apple-system, sans-serif";
+    ctx.fillStyle = dimColor + "99";
+    ctx.textBaseline = "middle";
+    ctx.fillText("100%", 2, ref100Y);
+    ctx.fillText("50%", 2, ref50Y);
+
+    // Build path points, inserting zero segments for gaps
+    const points = [];
+    for (let di = 0; di < days.length; di++) {
+      const day = days[di];
+      // Detect gap from previous day
+      if (di > 0) {
+        const prevDay = days[di - 1];
+        const prevDate = new Date(prevDay);
+        const expectedNext = new Date(prevDate.getFullYear(), prevDate.getMonth(), prevDate.getDate() + 1).getTime();
+        if (day > expectedNext) {
+          const gapX = timeToPx(expectedNext);
+          const gapXEnd = timeToPx(day);
+          points.push({ x: gapX, xEnd: gapXEnd, y: chartY + chartH, util: 0 });
+        }
+      }
+      const x = timeToPx(day);
+      const nextDate = new Date(day);
+      nextDate.setDate(nextDate.getDate() + 1);
+      const xEnd = timeToPx(nextDate.getTime());
+      const util = dayUtil[day];
+      const ratio = Math.min(util / maxVis, 1);
+      const y = chartY + chartH * (1 - ratio);
+      points.push({ x, xEnd, y, util });
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, chartY, totalW, chartH);
+    ctx.clip();
+
+    // Filled area as step chart
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, chartY + chartH);
+    for (const p of points) {
+      ctx.lineTo(p.x, p.y);
+      ctx.lineTo(p.xEnd, p.y);
+    }
+    ctx.lineTo(points[points.length - 1].xEnd, chartY + chartH);
+    ctx.closePath();
+    ctx.fillStyle = accentColor + "25";
+    ctx.fill();
+
+    // Overloaded regions with danger fill
+    for (const p of points) {
+      if (p.util > 100) {
+        ctx.fillStyle = dangerColor + "35";
+        ctx.fillRect(p.x, p.y, p.xEnd - p.x, ref100Y - p.y);
+      }
+    }
+
+    // Step line with per-segment color
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      ctx.strokeStyle = p.util > 100 ? dangerColor + "cc" : accentColor + "bb";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.xEnd, p.y);
+      ctx.stroke();
+      // Vertical step to next segment
+      if (i < points.length - 1) {
+        const next = points[i + 1];
+        ctx.strokeStyle = next.util > 100 ? dangerColor + "cc" : accentColor + "bb";
+        ctx.beginPath();
+        ctx.moveTo(next.x, p.y);
+        ctx.lineTo(next.x, next.y);
+        ctx.stroke();
+      }
+    }
+
+    // Percentage labels on segments that are wide enough
+    ctx.font = "bold 8px -apple-system, sans-serif";
+    ctx.textBaseline = "bottom";
+    for (const p of points) {
+      const segW = p.xEnd - p.x;
+      if (segW > 24) {
+        ctx.fillStyle = p.util > 100 ? dangerColor : dimColor;
+        ctx.fillText(p.util + "%", p.x + 2, p.y - 1);
+      }
+    }
+
+    ctx.restore();
   }
 
   function drawGridVariable(ctx, totalW, totalH, z) {
@@ -1215,6 +1363,27 @@
         }
       }
       setHoveredRow(rowIdx);
+      // Utilization tooltip in resource view
+      const tooltip = $("#util-tooltip");
+      if (viewMode === "resources" && rowIdx >= 0) {
+        const rv = resViewRows[rowIdx];
+        if (rv && Object.keys(rv.dayUtil).length > 0) {
+          const dayKey = pxToTime(mx);
+          const util = rv.dayUtil[dayKey];
+          if (util !== undefined) {
+            tooltip.textContent = util + "% utilized";
+            tooltip.style.display = "block";
+            tooltip.style.left = (mx + 12) + "px";
+            tooltip.style.top = (my - 24) + "px";
+          } else {
+            tooltip.style.display = "none";
+          }
+        } else {
+          tooltip.style.display = "none";
+        }
+      } else {
+        tooltip.style.display = "none";
+      }
     });
     canvas.addEventListener("mouseleave", () => {
       if (dragTask) return;
@@ -1223,6 +1392,7 @@
       hoveredTaskIdx = -1;
       canvas.style.cursor = "default";
       if (viewMode === "tasks") { renderBars(null); renderDeps(); }
+      $("#util-tooltip").style.display = "none";
     });
   }
 
@@ -2215,8 +2385,11 @@
           const barH = laneH - gap;
           const y = rowY + BAR_PAD + rv._lanes[i] * laneH;
           const meta = a.role && a.allocation !== 100 ? ` (${a.role} | ${a.allocation}%)` : a.role ? ` (${a.role})` : a.allocation !== 100 ? ` (${a.allocation}%)` : "";
-        const label = t.name + meta;
+          const label = t.name + meta;
           drawBar(hiCtx, x1, y, w, t.color, t.progress, label, barH);
+        }
+        if (rv._utilH > 0) {
+          drawUtilChart(hiCtx, rv, rowY + rv._rowH - rv._utilH, rv._utilH, chartW);
         }
       }
     }
@@ -2422,6 +2595,14 @@
     });
     $("#btn-vzoom-out").addEventListener("click", () => {
       if (vZoomIdx > 0) { vZoomIdx--; applyVZoom(); saveUIState(); render(); }
+    });
+
+    // Font size
+    $("#btn-font-up").addEventListener("click", () => {
+      if (fontIdx < FONT_LEVELS.length - 1) { fontIdx++; applyFontZoom(); saveUIState(); render(); }
+    });
+    $("#btn-font-down").addEventListener("click", () => {
+      if (fontIdx > 0) { fontIdx--; applyFontZoom(); saveUIState(); render(); }
     });
 
     // Task form — collects resource_ids from checkboxes
@@ -2761,7 +2942,8 @@
   function dateToPx(dateStr) {
     const d = parseLocal(dateStr);
     const z = ZOOM_LEVELS[zoomIdx];
-    return ((d.getTime() - timeOrigin.getTime()) / (z.days * 86400000)) * z.colW;
+    const diffDays = Math.round((d.getTime() - timeOrigin.getTime()) / 86400000);
+    return (diffDays / z.days) * z.colW;
   }
 
   function oneDayPx() {
@@ -2771,7 +2953,16 @@
 
   function timeToPx(ts) {
     const z = ZOOM_LEVELS[zoomIdx];
-    return ((ts - timeOrigin.getTime()) / (z.days * 86400000)) * z.colW;
+    const diffDays = Math.round((ts - timeOrigin.getTime()) / 86400000);
+    return (diffDays / z.days) * z.colW;
+  }
+
+  function pxToTime(px) {
+    const z = ZOOM_LEVELS[zoomIdx];
+    const dayOffset = Math.floor((px / z.colW) * z.days);
+    const d = new Date(timeOrigin.getTime());
+    d.setDate(d.getDate() + dayOffset);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   }
 
   function todayStr() {
@@ -2816,6 +3007,7 @@
     const state = {
       zoomIdx,
       vZoomIdx,
+      fontIdx,
       viewMode,
       currentProjectId,
       sidebarCollapsed,
@@ -2832,6 +3024,7 @@
       const s = JSON.parse(raw);
       if (s.zoomIdx != null && s.zoomIdx >= 0 && s.zoomIdx < ZOOM_LEVELS.length) zoomIdx = s.zoomIdx;
       if (s.vZoomIdx != null && s.vZoomIdx >= 0 && s.vZoomIdx < V_ZOOM_LEVELS.length) vZoomIdx = s.vZoomIdx;
+      if (s.fontIdx != null && s.fontIdx >= 0 && s.fontIdx < FONT_LEVELS.length) fontIdx = s.fontIdx;
       if (s.viewMode === "tasks" || s.viewMode === "resources") viewMode = s.viewMode;
       if (s.currentProjectId != null) currentProjectId = s.currentProjectId;
       if (typeof s.sidebarCollapsed === "boolean") sidebarCollapsed = s.sidebarCollapsed;
@@ -2976,6 +3169,7 @@
   applyTheme(currentTheme);
   $("#zoom-label").textContent = ZOOM_LEVELS[zoomIdx].name;
   applyVZoom();
+  applyFontZoom();
   applySidebarWidth();
   if (sidebarCollapsed) {
     $("#gantt-sidebar").classList.add("collapsed");

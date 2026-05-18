@@ -3,8 +3,8 @@ services:
     build:
       context: .
       args:
-        VERSION: "0.2"
-    image: resource-planner:0.2
+        VERSION: "0.3"
+    image: resource-planner:0.3
     ports:
       - "5000:5000"
     volumes:

@@ -7,7 +7,8 @@ A Python/Flask web application for multi-project resource planning with an inter
 ### Gantt Chart (Task View)
 - Canvas-rendered task bars with color coding
 - **Horizontal zoom**: five levels — Day, 3-Day, Week, 2-Week, Month
-- **Vertical zoom**: five row sizes — XS, S, M (default), L, XL — bar height, font, and row spacing all scale together
+- **Vertical zoom**: six row sizes — XS, S, M (default), L, XL, XXL — bar height, font, and row spacing all scale together
+- **Font size**: five levels — XS, S, M (default), L, XL — scales sidebar text, date headers, modal labels, buttons, and other UI chrome independently of row height
 - Today marker (red vertical line)
 - Grid lines for time orientation
 - Horizontal scrolling with synced header and sidebar
@@ -41,6 +42,13 @@ A Python/Flask web application for multi-project resource planning with an inter
   - Two tasks at 80% each = 160% = overloaded
 - Overloaded date ranges are highlighted with a red overlay on the chart, showing peak % labels
 - Resources exceeding 100% utilization are flagged red in the sidebar
+- **Utilization sparkline** — a step chart at the bottom of each resource row visualizes total allocation over time
+  - Reference lines at 50% and 100% provide scale
+  - Per-segment percentage labels are drawn on the chart
+  - Gaps between assignments step cleanly to zero (no diagonal ramps)
+  - Segments exceeding 100% are highlighted in the danger color
+  - **Hover tooltip** — mouse over the sparkline area to see the exact utilization percentage for any day
+- **Drag to reorder** — drag resource rows vertically to reorder; sort order is persisted to the database
 
 ### Sidebar Panel
 - **Collapsible** — toggle button (arrow) hides/shows the sidebar; when collapsed, task bars display resource names inline
@@ -152,6 +160,7 @@ A Python/Flask web application for multi-project resource planning with an inter
 - All UI preferences are saved to browser localStorage and restored on page load:
   - Horizontal zoom level
   - Vertical zoom level
+  - Font size level
   - View mode (Tasks / Resources)
   - Selected project filter
   - Sidebar collapsed state
@@ -207,7 +216,7 @@ docker compose down
 
 ### Versioning
 
-The Docker image includes version and build date labels. The version is set in `docker-compose.yml` under `build.args.VERSION` (currently `0.2`). The build date is injected automatically when passing the build arg:
+The Docker image includes version and build date labels. The version is set in `docker-compose.yml` under `build.args.VERSION` (currently `0.3`). The build date is injected automatically when passing the build arg:
 
 ```bash
 docker compose build --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -216,7 +225,7 @@ docker compose build --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 Inspect labels with:
 
 ```bash
-docker inspect resource-planner:0.2 --format '{{json .Config.Labels}}'
+docker inspect resource-planner:0.3 --format '{{json .Config.Labels}}'
 ```
 
 ### Saving and Loading Images
@@ -224,7 +233,7 @@ docker inspect resource-planner:0.2 --format '{{json .Config.Labels}}'
 Save the image to a portable tar file:
 
 ```bash
-docker save resource-planner:0.2 -o resource-planner-v0.2.tar
+docker save resource-planner:0.3 -o resource-planner-v0.2.tar
 ```
 
 Load it on another machine:
