@@ -1,7 +1,10 @@
 services:
   resource-planner:
-    build: .
-    image: resource-planner
+    build:
+      context: .
+      args:
+        VERSION: "0.2"
+    image: resource-planner:0.2
     ports:
       - "5000:5000"
     volumes:

@@ -811,7 +811,8 @@
       const barLabel = sidebarCollapsed && t.resources && t.resources.length
         ? t.name + " \u2014 " + t.resources.map((r) => r.role ? `${r.name} [${r.role}]` : r.name).join(", ")
         : t.name;
-      drawBar(ctx, x1, y, w, t.color, t.progress, barLabel);
+      const unstaffed = !t.resource_ids || t.resource_ids.length === 0;
+      drawBar(ctx, x1, y, w, t.color, t.progress, barLabel, null, unstaffed);
 
       // resource dots on the bar
       const dotR = Math.max(2, Math.min(BAR_H * 0.12, 4));
@@ -1022,7 +1023,7 @@
     }
   }
 
-  function drawBar(ctx, x, y, w, color, progress, label, h) {
+  function drawBar(ctx, x, y, w, color, progress, label, h, unstaffed) {
     const barH = h || BAR_H;
     ctx.fillStyle = color + "55";
     ctx.beginPath(); roundRect(ctx, x, y, w, barH, 4); ctx.fill();
@@ -1030,9 +1031,30 @@
       ctx.fillStyle = color + "cc";
       ctx.beginPath(); roundRect(ctx, x, y, (w * progress) / 100, barH, 4); ctx.fill();
     }
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
-    ctx.beginPath(); roundRect(ctx, x, y, w, barH, 4); ctx.stroke();
+    if (unstaffed) {
+      ctx.save();
+      ctx.beginPath(); roundRect(ctx, x, y, w, barH, 4); ctx.clip();
+      const hatchColor = cssVar("--danger") || "#e74c3c";
+      ctx.strokeStyle = hatchColor + "60";
+      ctx.lineWidth = 2;
+      const step = 8;
+      for (let i = -barH; i < w + barH; i += step) {
+        ctx.beginPath();
+        ctx.moveTo(x + i, y + barH);
+        ctx.lineTo(x + i + barH, y);
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.strokeStyle = hatchColor;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath(); roundRect(ctx, x, y, w, barH, 4); ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); roundRect(ctx, x, y, w, barH, 4); ctx.stroke();
+    }
     ctx.fillStyle = lightMode ? "#1e1e1e" : "#fff";
     const fontSize = Math.max(8, Math.min(barH * 0.6, 16));
     ctx.font = `${fontSize}px -apple-system, sans-serif`;
@@ -2162,7 +2184,8 @@
         const barLabel = sidebarCollapsed && t.resources && t.resources.length
           ? t.name + " \u2014 " + t.resources.map((r) => r.role ? `${r.name} [${r.role}]` : r.name).join(", ")
           : t.name;
-        drawBar(hiCtx, x1, y, w, t.color, t.progress, barLabel);
+        const unstaffed = !t.resource_ids || t.resource_ids.length === 0;
+        drawBar(hiCtx, x1, y, w, t.color, t.progress, barLabel, null, unstaffed);
         if (t.resources && t.resources.length > 0) {
           const dotR = Math.max(2, Math.min(BAR_H * 0.12, 4));
           const dotY = y + BAR_H - dotR - 1;
@@ -2330,6 +2353,8 @@
 
   function setupEvents() {
     $("#btn-add-task").addEventListener("click", () => openTaskModal(null));
+    $("#btn-undo").addEventListener("click", () => undo());
+    $("#btn-redo").addEventListener("click", () => redo());
     $("#btn-manage-resources").addEventListener("click", () => openResourceListModal());
     $("#btn-add-project").addEventListener("click", () => openProjectModal(null));
     $("#btn-edit-project").addEventListener("click", () => {
@@ -2691,10 +2716,12 @@
     $("#ctx-add-dep").addEventListener("click", () => openDepModal(ctxTask));
     $("#ctx-edit-task").addEventListener("click", () => { if (ctxTask) openTaskModal(ctxTask); });
 
-    // Close modals on overlay click
+    // Close modals on overlay click (only if mousedown also started on overlay)
     document.querySelectorAll(".modal-overlay").forEach((overlay) => {
+      let mouseDownTarget = null;
+      overlay.addEventListener("mousedown", (e) => { mouseDownTarget = e.target; });
       overlay.addEventListener("click", (e) => {
-        if (e.target !== overlay) return;
+        if (e.target !== overlay || mouseDownTarget !== overlay) return;
         if (overlay.id === "resource-modal") closeResourceModal();
         else if (overlay.id === "project-modal") closeProjectModal();
         else if (overlay.id === "theme-edit-modal") closeThemeEditModal();
@@ -2702,12 +2729,13 @@
       });
     });
     document.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+      const key = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) {
         e.preventDefault();
         undo();
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
+      if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) {
         e.preventDefault();
         redo();
         return;

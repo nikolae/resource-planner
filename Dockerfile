@@ -1,5 +1,12 @@
 FROM python:3.12-slim
 
+ARG VERSION=0.2
+ARG BUILD_DATE
+
+LABEL version="${VERSION}" \
+      build_date="${BUILD_DATE}" \
+      description="Resource Planner"
+
 WORKDIR /app
 
 COPY requirements.txt .

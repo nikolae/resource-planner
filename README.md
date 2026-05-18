@@ -67,6 +67,7 @@ A Python/Flask web application for multi-project resource planning with an inter
 - **Allocation %** per resource-task assignment (1-100%), configurable in the task modal
   - e.g., assign a PM at 10% and an engineer at 80% on the same task
   - Allocations below 100% are shown in the sidebar: "Alice (80%), Bob (30%)"
+- **Unstaffed indicator** — tasks with no resources assigned render with diagonal hatching and a dashed red border to stand out
 - Drag to move tasks on the chart
 - Drag bar edges to resize (change start/end dates)
 - **Drag to reorder** — drag sidebar rows vertically to reorder tasks; ghost row and drop indicator show the target position
@@ -141,6 +142,7 @@ A Python/Flask web application for multi-project resource planning with an inter
 
 ### Undo / Redo
 - **Ctrl+Z** to undo, **Ctrl+Y** or **Ctrl+Shift+Z** to redo (Cmd on Mac)
+- **Undo/Redo buttons** in the header for mouse-driven workflows
 - Supports: drag move/resize, task edit, task create, task delete, dependency create, dependency delete, task reorder
 - Undo restores previous state via API calls; redo re-applies the action
 - Undo stack holds up to 50 actions; redo stack clears on any new action
@@ -201,6 +203,34 @@ To stop:
 
 ```bash
 docker compose down
+```
+
+### Versioning
+
+The Docker image includes version and build date labels. The version is set in `docker-compose.yml` under `build.args.VERSION` (currently `0.2`). The build date is injected automatically when passing the build arg:
+
+```bash
+docker compose build --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+```
+
+Inspect labels with:
+
+```bash
+docker inspect resource-planner:0.2 --format '{{json .Config.Labels}}'
+```
+
+### Saving and Loading Images
+
+Save the image to a portable tar file:
+
+```bash
+docker save resource-planner:0.2 -o resource-planner-v0.2.tar
+```
+
+Load it on another machine:
+
+```bash
+docker load -i resource-planner-v0.2.tar
 ```
 
 ## Configuration
