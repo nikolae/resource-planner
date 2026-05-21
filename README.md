@@ -8,7 +8,7 @@ A Python/Flask web application for multi-project resource planning with an inter
 - Canvas-rendered task bars with color coding
 - **Horizontal zoom**: five levels — Day, 3-Day, Week, 2-Week, Month
 - **Vertical zoom**: six row sizes — XS, S, M (default), L, XL, XXL — bar height, font, and row spacing all scale together
-- **Font size**: five levels — XS, S, M (default), L, XL — scales sidebar text, date headers, modal labels, buttons, and other UI chrome independently of row height
+- **Font size**: five levels — XS, S, M (default), L, XL — scales all UI text globally (sidebar, headers, modals, buttons, documentation) independently of row height
 - Today marker (red vertical line)
 - Grid lines for time orientation
 - Horizontal scrolling with synced header and sidebar
@@ -33,6 +33,7 @@ A Python/Flask web application for multi-project resource planning with an inter
 ### Resource Timeline View
 - Toggle between **Tasks** and **Resources** views via buttons in the header
 - Resource view shows one row per resource with all their assigned task bars
+- **Project filtering** — when a specific project is selected, only resources with assignments in that project are shown; "All Projects" shows all resources
 - **Per-assignment bars** — if a resource has multiple roles on the same task (e.g., PM and IC), each assignment renders as a separate bar with role and allocation in the label (e.g., "Task Name (PM | 10%)")
 - **Lane stacking** — overlapping assignments are stacked vertically into lanes within the row; row height expands dynamically to fit all lanes at a legible size
 - Sidebar displays resource name, **all unique assigned roles** (not just the default), assignment count, and **peak utilization %**
@@ -169,14 +170,21 @@ A Python/Flask web application for multi-project resource planning with an inter
 
 ### Settings
 - Gear icon in the header opens a settings modal
-- Editable parameters: application name, host, port, debug mode, database URI
-- The application name controls the header title and browser tab title, and takes effect immediately
+- Editable parameters: application name, version, host, port, debug mode, database URI
+- The application name and version control the header title and browser tab (displayed as "Name Version"), and take effect immediately
+- `APP_NAME` and `APP_VERSION` environment variables override config.json values (useful for Docker deployments)
 - **Load Demo Data** button is available in the settings modal to populate sample projects
 - **Reset All Data** — clears all projects, tasks, resources, and dependencies with double confirmation
 - Settings are persisted to `config.json`; host, port, and database URI changes require a server restart
 
+### In-App Documentation
+- **Getting Started** (? icon) — quick-reference modal covering core workflows and keyboard shortcuts
+- **Documentation** (page icon) — renders the full README inside the app as formatted HTML with styled headings, tables, code blocks, and lists
+- Both modals scale with the font size setting
+
 ### Demo Data
 - Click "Load Demo Data" in the settings modal to populate two sample projects with resources, tasks, dependencies, and realistic allocation percentages
+- Can be loaded at any time, even when other projects already exist — existing resources are reused by name to avoid duplicates
 - Includes examples of partial allocations (PM at 10%, engineer at 80%) and overloaded resources
 
 ## Quick Start
@@ -216,7 +224,7 @@ docker compose down
 
 ### Versioning
 
-The Docker image includes version and build date labels. The version is set in `docker-compose.yml` under `build.args.VERSION` (currently `0.3`). The build date is injected automatically when passing the build arg:
+The Docker image includes version and build date labels. The version is set in `docker-compose.yml` under `build.args.VERSION` (currently `0.4`). The build date is injected automatically when passing the build arg:
 
 ```bash
 docker compose build --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -225,22 +233,47 @@ docker compose build --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 Inspect labels with:
 
 ```bash
-docker inspect resource-planner:0.3 --format '{{json .Config.Labels}}'
+docker inspect resource-planner:0.4 --format '{{json .Config.Labels}}'
 ```
+
+### Environment Variables
+
+The following environment variables override `config.json` values at runtime:
+
+| Variable      | Description                             | Default            |
+|---------------|-----------------------------------------|--------------------|
+| `APP_NAME`    | Application name shown in header/title  | From config.json   |
+| `APP_VERSION` | Version shown next to the app name      | Build-arg VERSION  |
+
+Set these in `docker-compose.yml` under `environment:`, or when creating a container in Container Station / Portainer.
 
 ### Saving and Loading Images
 
 Save the image to a portable tar file:
 
 ```bash
-docker save resource-planner:0.3 -o resource-planner-v0.2.tar
+docker save resource-planner:0.4 -o resource-planner-v0.4.tar
 ```
 
 Load it on another machine:
 
 ```bash
-docker load -i resource-planner-v0.2.tar
+docker load -i resource-planner-v0.4.tar
 ```
+
+### QNAP Container Station
+
+Docker Desktop with BuildKit enabled produces OCI-format images that Container Station cannot import. To build a compatible image, disable BuildKit in Docker Desktop (Settings → Docker Engine → set `"buildkit": false`), then build and save:
+
+```bash
+docker build -t resource-planner:0.4 .
+docker save resource-planner:0.4 -o resource-planner-v0.4.tar
+```
+
+Import the `.tar` file in Container Station under **Images → Import**. When creating the container, set:
+- Port mapping: host `5000` → container `5000`
+- Volume: bind a folder to `/app/instance` for database persistence
+- Environment variables: `APP_NAME` and `APP_VERSION` as desired
 
 ## Configuration
 
@@ -253,20 +286,22 @@ Server settings are stored in `config.json` in the project root:
   "debug": true,
   "database_uri": "sqlite:///planner.db",
   "secret_key": "change-me-in-production",
-  "app_name": "Resource Planner"
+  "app_name": "Resource Planner",
+  "app_version": "0.4"
 }
 ```
 
-| Key            | Description                                      | Restart required |
-|----------------|--------------------------------------------------|------------------|
-| `app_name`     | Application name shown in header and browser tab | No               |
-| `host`         | Server bind address                              | Yes              |
-| `port`         | Server port                                      | Yes              |
-| `debug`        | Flask debug mode                                 | Yes              |
-| `database_uri` | SQLAlchemy database connection string            | Yes              |
-| `secret_key`   | Flask secret key (not exposed via API)           | Yes              |
+| Key            | Description                                         | Restart required |
+|----------------|-----------------------------------------------------|------------------|
+| `app_name`     | Application name shown in header and browser tab    | No               |
+| `app_version`  | Version shown next to the name (e.g. "0.4")         | No               |
+| `host`         | Server bind address                                 | Yes              |
+| `port`         | Server port                                         | Yes              |
+| `debug`        | Flask debug mode                                    | Yes              |
+| `database_uri` | SQLAlchemy database connection string               | Yes              |
+| `secret_key`   | Flask secret key (not exposed via API)              | Yes              |
 
-Edit this file directly, or use the settings modal in the web UI (gear icon). Changes to host, port, and database URI require a server restart.
+Edit this file directly, or use the settings modal in the web UI (gear icon). Changes to host, port, and database URI require a server restart. `app_name` and `app_version` can also be overridden via environment variables (`APP_NAME`, `APP_VERSION`).
 
 ## Project Structure
 

@@ -32,7 +32,8 @@
       <button id="btn-manage-resources" class="btn btn-secondary">Resources</button>
       <button id="btn-export" class="btn btn-secondary">Export</button>
       <button id="btn-themes" class="btn btn-ghost btn-icon" title="Themes">&#127912;</button>
-      <button id="btn-help" class="btn btn-ghost btn-icon" title="Help">?</button>
+      <button id="btn-help" class="btn btn-ghost btn-icon" title="Getting Started">?</button>
+      <button id="btn-docs" class="btn btn-ghost btn-icon" title="Documentation">&#128196;</button>
       <button id="btn-settings" class="btn btn-ghost btn-icon" title="Settings">&#9881;</button>
       <div class="zoom-controls" title="Horizontal zoom">
         <button id="btn-zoom-out" class="btn btn-ghost btn-icon" title="Zoom out">&minus;</button>
@@ -211,7 +212,10 @@
     <div class="modal">
       <h2>Settings</h2>
       <form id="settings-form">
-        <label>Application Name <input type="text" id="cfg-app-name"></label>
+        <div class="form-row">
+          <label>Application Name <input type="text" id="cfg-app-name"></label>
+          <label>Version <input type="text" id="cfg-app-version" placeholder="e.g. 0.3"></label>
+        </div>
         <label>Host <input type="text" id="cfg-host"></label>
         <label>Port <input type="number" id="cfg-port" min="1" max="65535"></label>
         <label>Debug mode
@@ -365,10 +369,25 @@
             <tr><td><kbd>Esc</kbd></td><td>Close the current modal</td></tr>
           </table>
         </div>
+        <div class="help-section">
+          <h3>Full Documentation</h3>
+          <p>Click the <strong>page icon</strong> in the header (next to this button) for the complete documentation including API reference, data model, and Docker deployment details.</p>
+        </div>
       </div>
       <div class="form-actions">
         <button type="button" class="btn btn-primary" id="btn-help-close">Got it</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Docs modal -->
+  <div class="modal-overlay" id="docs-modal">
+    <div class="modal" style="width:750px;max-width:90vw;max-height:85vh">
+      <div class="modal-header-row">
+        <h2>Documentation</h2>
+        <button type="button" class="btn btn-ghost btn-icon" id="btn-docs-close">&times;</button>
+      </div>
+      <div id="docs-content" class="docs-content"></div>
     </div>
   </div>
 

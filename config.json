@@ -4,5 +4,5 @@
   "debug": true,
   "database_uri": "sqlite:///planner.db",
   "secret_key": "change-me-in-production",
-  "app_name": "Resource Planner"
+  "app_name": "Nick's Super Great Resource Planner"
 }

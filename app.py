@@ -14,10 +14,15 @@ def load_config():
         "database_uri": "sqlite:///planner.db",
         "secret_key": "change-me-in-production",
         "app_name": "Resource Planner",
+        "app_version": "",
     }
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH) as f:
             defaults.update(json.load(f))
+    if os.environ.get("APP_NAME"):
+        defaults["app_name"] = os.environ["APP_NAME"]
+    if os.environ.get("APP_VERSION"):
+        defaults["app_version"] = os.environ["APP_VERSION"]
     return defaults
 
 config = load_config()
@@ -71,6 +76,15 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/api/readme")
+def get_readme():
+    readme_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "README.md")
+    if os.path.exists(readme_path):
+        with open(readme_path) as f:
+            return jsonify({"content": f.read()})
+    return jsonify({"content": ""}), 404
+
+
 @app.route("/api/config", methods=["GET"])
 def get_config():
     safe = {k: v for k, v in config.items() if k != "secret_key"}
@@ -80,7 +94,7 @@ def get_config():
 @app.route("/api/config", methods=["PUT"])
 def update_config():
     data = request.json
-    allowed = {"host", "port", "debug", "database_uri", "app_name"}
+    allowed = {"host", "port", "debug", "database_uri", "app_name", "app_version"}
     for key in data:
         if key in allowed:
             config[key] = data[key]
@@ -431,7 +445,7 @@ def import_project():
         if td.get("parent_idx") is not None:
             parent_id = task_idx_to_id.get(td["parent_idx"])
             if parent_id:
-                Task.query.get(task_idx_to_id[i]).parent_id = parent_id
+                db.session.get(Task, task_idx_to_id[i]).parent_id = parent_id
 
     # Create assignments
     for a in data.get("assignments", []):
@@ -462,9 +476,6 @@ def import_project():
 
 @app.route("/api/seed", methods=["POST"])
 def seed_data():
-    if Task.query.count() > 0:
-        return jsonify({"msg": "Data already exists"}), 200
-
     today = date.today()
 
     p1 = Project(name="Website Redesign", description="Full site overhaul", color="#4a86c8")
@@ -472,9 +483,9 @@ def seed_data():
     db.session.add_all([p1, p2])
     db.session.flush()
 
-    r1 = Resource(name="Alice", role="Engineer", color="#4a86c8")
-    r2 = Resource(name="Bob", role="Designer", color="#e8743b")
-    r3 = Resource(name="Carol", role="PM", color="#19a979")
+    r1 = Resource.query.filter_by(name="Alice").first() or Resource(name="Alice", role="Engineer", color="#4a86c8")
+    r2 = Resource.query.filter_by(name="Bob").first() or Resource(name="Bob", role="Designer", color="#e8743b")
+    r3 = Resource.query.filter_by(name="Carol").first() or Resource(name="Carol", role="PM", color="#19a979")
     db.session.add_all([r1, r2, r3])
     db.session.flush()
 

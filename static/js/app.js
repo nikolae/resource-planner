@@ -144,6 +144,57 @@
     return r.json();
   };
 
+  function renderMarkdown(md) {
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const lines = md.split("\n");
+    let html = "", inCode = false, inList = false, inTable = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.startsWith("```")) {
+        if (inCode) { html += "</code></pre>"; inCode = false; }
+        else { html += "<pre><code>"; inCode = true; }
+        continue;
+      }
+      if (inCode) { html += esc(line) + "\n"; continue; }
+      if (/^\|(.+)\|$/.test(line)) {
+        if (!inTable) { html += "<table>"; inTable = true; }
+        if (/^\|[\s-:|]+\|$/.test(line)) continue;
+        const cells = line.slice(1, -1).split("|").map((c) => c.trim());
+        const tag = !html.includes("<tr>") || (i > 0 && /^\|[\s-:|]+\|$/.test(lines[i + 1] || "")) ? "th" : "td";
+        const isHeader = i + 1 < lines.length && /^\|[\s-:|]+\|$/.test(lines[i + 1]);
+        const t = isHeader ? "th" : "td";
+        html += "<tr>" + cells.map((c) => `<${t}>${inline(c)}</${t}>`).join("") + "</tr>";
+        continue;
+      }
+      if (inTable) { html += "</table>"; inTable = false; }
+      if (/^#{1,3}\s/.test(line)) {
+        if (inList) { html += "</ul>"; inList = false; }
+        const lvl = line.match(/^#+/)[0].length;
+        const text = line.replace(/^#+\s*/, "");
+        html += `<h${lvl}>${inline(text)}</h${lvl}>`;
+      } else if (/^\s*[-*]\s/.test(line)) {
+        if (!inList) { html += "<ul>"; inList = true; }
+        html += `<li>${inline(line.replace(/^\s*[-*]\s*/, ""))}</li>`;
+      } else if (line.trim() === "") {
+        if (inList) { html += "</ul>"; inList = false; }
+        html += " ";
+      } else {
+        if (inList) { html += "</ul>"; inList = false; }
+        html += `<p>${inline(line)}</p>`;
+      }
+    }
+    if (inList) html += "</ul>";
+    if (inTable) html += "</table>";
+    if (inCode) html += "</code></pre>";
+    return html;
+    function inline(s) {
+      return esc(s)
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/`(.+?)`/g, "<code>$1</code>")
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+    }
+  }
+
   // ── Undo stack ──────────────────────────────────────────
   const undoStack = [];
   const redoStack = [];
@@ -170,6 +221,14 @@
         } : null;
         await api(`/api/tasks/${action.id}`, "PUT", action.before);
         redoStack.push({ type: "task-update", id: action.id, before: curState });
+        break;
+      }
+      case "task-update-cascade": {
+        await api(`/api/tasks/${action.id}`, "PUT", action.before);
+        for (const c of (action.cascaded || [])) {
+          await api(`/api/tasks/${c.id}`, "PUT", c.before);
+        }
+        redoStack.push({ type: "task-update-cascade", id: action.id, before: action.before, after: action.after, cascaded: action.cascaded });
         break;
       }
       case "task-create": {
@@ -250,6 +309,14 @@
         } : null;
         await api(`/api/tasks/${action.id}`, "PUT", action.before);
         undoStack.push({ type: "task-update", id: action.id, before: curState });
+        break;
+      }
+      case "task-update-cascade": {
+        await api(`/api/tasks/${action.id}`, "PUT", action.after);
+        for (const c of (action.cascaded || [])) {
+          await api(`/api/tasks/${c.id}`, "PUT", c.after);
+        }
+        undoStack.push({ type: "task-update-cascade", id: action.id, before: action.before, after: action.after, cascaded: action.cascaded });
         break;
       }
       case "task-delete-redo": {
@@ -402,7 +469,9 @@
 
   async function loadConfig() {
     const cfg = await api("/api/config");
-    const title = cfg.app_name || "Resource Planner";
+    const name = cfg.app_name || "Resource Planner";
+    const version = cfg.app_version || "";
+    const title = version ? `${name} ${version}` : name;
     $("#app-title").textContent = title;
     document.title = title;
   }
@@ -481,6 +550,7 @@
     const DAY_MS = 86400000;
     for (const r of resources) {
       const rTasks = tasks.filter((t) => t.resource_ids.includes(r.id));
+      if (currentProjectId && rTasks.length === 0) continue;
       // Build individual assignments (one per role entry, not collapsed)
       const assignments = [];
       for (const t of rTasks) {
@@ -513,6 +583,8 @@
           cur.setDate(cur.getDate() + 1);
         }
       }
+      const dayVals = Object.values(dayUtil);
+      const minUtil = dayVals.length > 0 ? Math.min(...dayVals) : 0;
 
       // Find contiguous overloaded spans (>100%)
       const overloaded = [];
@@ -541,7 +613,7 @@
         span.util = peak;
       }
 
-      resViewRows.push({ resource: r, tasks: rTasks, assignments, taskAllocs, overloaded, peakUtil, dayUtil });
+      resViewRows.push({ resource: r, tasks: rTasks, assignments, taskAllocs, overloaded, peakUtil, minUtil, dayUtil });
     }
   }
 
@@ -584,13 +656,13 @@
       ).join("");
       const names = t.resource_name || "\u2014";
       row.innerHTML = `
-        <span class="col-name" style="${indent}">
+        <span class="col-name" style="${indent}" title="${esc(t.name)}">
           <span class="resource-dots">${dots || `<span class="task-dot" style="background:${t.color}"></span>`}</span>
           ${esc(t.name)}
         </span>
-        <span class="col-dates">${fmtDate(t.start_date)}</span>
-        <span class="col-dates">${fmtDate(t.end_date)}</span>
-        <span class="col-resource" title="${esc(names)}">${esc(names)}</span>`;
+        <span class="col-dates" title="Start: ${t.start_date}">${fmtDate(t.start_date)}</span>
+        <span class="col-dates" title="End: ${t.end_date}">${fmtDate(t.end_date)}</span>
+        <span class="col-resource" title="Resource: ${esc(names)}">${esc(names)}</span>`;
       row.addEventListener("click", (e) => { if (!reorderDrag) openTaskModal(t); });
       row.addEventListener("contextmenu", (e) => showCtxMenu(e, t));
       row.addEventListener("mouseenter", () => { if (!reorderDrag) setHoveredRow(idx); });
@@ -671,7 +743,7 @@
 
   function renderResourceSidebar() {
     const hdr = $(".sidebar-header");
-    hdr.innerHTML = `<span class="col-name" data-col="0">Resource<span class="col-resize-handle"></span></span><span class="col-resource" data-col="1">Role<span class="col-resize-handle"></span></span><span class="col-dates" data-col="2">Assign.<span class="col-resize-handle"></span></span><span class="col-dates" data-col="3">Peak</span>`;
+    hdr.innerHTML = `<span class="col-name" data-col="0" title="Resource">Resource<span class="col-resize-handle"></span></span><span class="col-resource" data-col="1" title="Role">Role<span class="col-resize-handle"></span></span><span class="col-dates" data-col="2" title="Assignments">Assign.<span class="col-resize-handle"></span></span><span class="col-dates" data-col="3" title="Min Utilization">Min<span class="col-resize-handle"></span></span><span class="col-dates" data-col="4" title="Peak Utilization">Peak</span>`;
     const body = $("#sidebar-body");
     body.innerHTML = "";
     for (let idx = 0; idx < resViewRows.length; idx++) {
@@ -685,16 +757,18 @@
         row.style.height = rv._rowH + "px";
       }
       const peakLabel = rv.peakUtil > 0 ? rv.peakUtil + "%" : "\u2014";
+      const minLabel = rv.assignments.length > 0 ? rv.minUtil + "%" : "\u2014";
       const roles = [...new Set(rv.assignments.map(a => a.role).filter(Boolean))];
       const roleStr = roles.length ? roles.join(", ") : r.role || "\u2014";
       row.innerHTML = `
-        <span class="col-name">
+        <span class="col-name" title="Resource: ${esc(r.name)}">
           <span class="task-dot" style="background:${r.color}"></span>
           ${esc(r.name)}
         </span>
-        <span class="col-resource" title="${esc(roleStr)}">${esc(roleStr)}</span>
-        <span class="col-dates">${rv.assignments.length}</span>
-        <span class="col-dates" ${overloaded ? 'style="color:var(--danger);font-weight:600"' : ""}>${peakLabel}</span>`;
+        <span class="col-resource" title="Role: ${esc(roleStr)}">${esc(roleStr)}</span>
+        <span class="col-dates" title="Assignments: ${rv.assignments.length}">${rv.assignments.length}</span>
+        <span class="col-dates" title="Min Utilization: ${minLabel}">${minLabel}</span>
+        <span class="col-dates" title="Peak Utilization: ${peakLabel}" ${overloaded ? 'style="color:var(--danger);font-weight:600"' : ""}>${peakLabel}</span>`;
       row.addEventListener("click", () => { if (!resReorderDrag) openResourceModal(r, false); });
       row.addEventListener("mouseenter", () => { if (!resReorderDrag) setHoveredRow(idx); });
       row.addEventListener("mouseleave", () => { if (!resReorderDrag) setHoveredRow(-1); });
@@ -1474,19 +1548,26 @@
       const t = dragTask; dragTask = null;
       $("#gantt-canvas").style.cursor = "default";
       if (t.start_date !== dragOrigStart || t.end_date !== dragOrigEnd) {
-        pushUndo({ type: "task-update", id: t.id, before: { start_date: dragOrigStart, end_date: dragOrigEnd } });
+        const snapshotBefore = tasks.map((x) => ({ id: x.id, start_date: x.start_date, end_date: x.end_date }));
         await api(`/api/tasks/${t.id}`, "PUT", { start_date: t.start_date, end_date: t.end_date });
-        // Calculate how much the relevant edge moved (for pull-back limiting)
         const origEnd = parseLocal(dragOrigEnd).getTime();
         const newEnd = parseLocal(t.end_date).getTime();
         const origStart = parseLocal(dragOrigStart).getTime();
         const newStart = parseLocal(t.start_date).getTime();
         const endDelta = Math.round((newEnd - origEnd) / 86400000);
         const startDelta = Math.round((newStart - origStart) / 86400000);
-        // Use the minimum movement as the pull-back limit
         const predDelta = Math.min(endDelta, startDelta);
         await enforceDepsFrom(t, predDelta);
         await loadAll();
+        const cascaded = [];
+        for (const snap of snapshotBefore) {
+          if (snap.id === t.id) continue;
+          const cur = tasks.find((x) => x.id === snap.id);
+          if (cur && (cur.start_date !== snap.start_date || cur.end_date !== snap.end_date)) {
+            cascaded.push({ id: snap.id, before: { start_date: snap.start_date, end_date: snap.end_date }, after: { start_date: cur.start_date, end_date: cur.end_date } });
+          }
+        }
+        pushUndo({ type: "task-update-cascade", id: t.id, before: { start_date: dragOrigStart, end_date: dragOrigEnd }, after: { start_date: t.start_date, end_date: t.end_date }, cascaded });
       }
     });
   }
@@ -2020,6 +2101,7 @@
   async function openSettingsModal() {
     const cfg = await api("/api/config");
     $("#cfg-app-name").value = cfg.app_name || "Resource Planner";
+    $("#cfg-app-version").value = cfg.app_version || "";
     $("#cfg-host").value = cfg.host;
     $("#cfg-port").value = cfg.port;
     $("#cfg-debug").value = String(cfg.debug);
@@ -2174,7 +2256,7 @@
     $("#btn-view-tasks").classList.toggle("active", mode === "tasks");
     $("#btn-view-resources").classList.toggle("active", mode === "resources");
     if (mode === "tasks") {
-      $(".sidebar-header").innerHTML = `<span class="col-name" data-col="0">Task<span class="col-resize-handle"></span></span><span class="col-dates" data-col="1">Start<span class="col-resize-handle"></span></span><span class="col-dates" data-col="2">End<span class="col-resize-handle"></span></span><span class="col-resource" data-col="3">Resource</span>`;
+      $(".sidebar-header").innerHTML = `<span class="col-name" data-col="0" title="Task">Task<span class="col-resize-handle"></span></span><span class="col-dates" data-col="1" title="Start Date">Start<span class="col-resize-handle"></span></span><span class="col-dates" data-col="2" title="End Date">End<span class="col-resize-handle"></span></span><span class="col-resource" data-col="3" title="Resource">Resource</span>`;
     }
     computeTimeline();
     render();
@@ -2556,6 +2638,12 @@
     $("#btn-themes").addEventListener("click", () => openThemeListModal());
     $("#btn-help").addEventListener("click", () => { $("#help-modal").classList.add("open"); });
     $("#btn-help-close").addEventListener("click", () => { $("#help-modal").classList.remove("open"); });
+    $("#btn-docs").addEventListener("click", async () => {
+      const data = await api("/api/readme");
+      $("#docs-content").innerHTML = renderMarkdown(data.content || "");
+      $("#docs-modal").classList.add("open");
+    });
+    $("#btn-docs-close").addEventListener("click", () => { $("#docs-modal").classList.remove("open"); });
     $("#btn-seed").addEventListener("click", async () => {
       await api("/api/seed", "POST");
       closeAllModals();
@@ -2790,12 +2878,14 @@
     $("#settings-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const appName = $("#cfg-app-name").value;
+      const appVersion = $("#cfg-app-version").value;
       await api("/api/config", "PUT", {
-        app_name: appName, host: $("#cfg-host").value,
+        app_name: appName, app_version: appVersion, host: $("#cfg-host").value,
         port: parseInt($("#cfg-port").value), debug: $("#cfg-debug").value === "true",
         database_uri: $("#cfg-db-uri").value,
       });
-      $("#app-title").textContent = appName; document.title = appName;
+      const title = appVersion ? `${appName} ${appVersion}` : appName;
+      $("#app-title").textContent = title; document.title = title;
       closeAllModals();
     });
     $("#btn-settings-cancel").addEventListener("click", closeAllModals);

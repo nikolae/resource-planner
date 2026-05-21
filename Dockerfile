@@ -1,11 +1,13 @@
 FROM python:3.12-slim
 
-ARG VERSION=0.3
+ARG VERSION=0.4
 ARG BUILD_DATE
 
 LABEL version="${VERSION}" \
       build_date="${BUILD_DATE}" \
       description="Resource Planner"
+
+ENV APP_VERSION=${VERSION}
 
 WORKDIR /app
 
