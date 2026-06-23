@@ -126,6 +126,7 @@
   let resources = [];
   let deps = [];
   let projects = [];
+  let blockedDays = [];
   let currentProjectId = null;
   let viewMode = "tasks"; // "tasks" or "resources"
   let timeOrigin;
@@ -459,8 +460,8 @@
   async function loadAll() {
     const taskUrl = currentProjectId ? `/api/tasks?project_id=${currentProjectId}` : "/api/tasks";
     const depUrl = currentProjectId ? `/api/dependencies?project_id=${currentProjectId}` : "/api/dependencies";
-    [tasks, resources, deps, projects] = await Promise.all([
-      api(taskUrl), api("/api/resources"), api(depUrl), api("/api/projects"),
+    [tasks, resources, deps, projects, blockedDays] = await Promise.all([
+      api(taskUrl), api("/api/resources"), api(depUrl), api("/api/projects"), api("/api/blocked-days"),
     ]);
     populateProjectSelect();
     computeTimeline();
@@ -614,6 +615,233 @@
       }
 
       resViewRows.push({ resource: r, tasks: rTasks, assignments, taskAllocs, overloaded, peakUtil, minUtil, dayUtil });
+    }
+  }
+
+  // ── Blocked days utilities ─────────────────────────────
+
+  function isDateBlocked(dateStr, resourceId, projectId) {
+    for (const bd of blockedDays) {
+      if (dateStr < bd.start_date || dateStr > bd.end_date) continue;
+      if (bd.scope === "global") return true;
+      if (bd.scope === "resource" && bd.resource_id === resourceId) return true;
+      if (bd.scope === "project" && bd.project_id === projectId) return true;
+    }
+    return false;
+  }
+
+  function isDateBlockedForTask(dateStr, task) {
+    for (const bd of blockedDays) {
+      if (dateStr < bd.start_date || dateStr > bd.end_date) continue;
+      if (bd.scope === "global") return true;
+      if (bd.scope === "project" && bd.project_id === task.project_id) return true;
+      if (bd.scope === "resource") {
+        const allBlocked = (task.resource_ids || []).length > 0 &&
+          (task.resource_ids || []).every((rid) => {
+            for (const b of blockedDays) {
+              if (dateStr < b.start_date || dateStr > b.end_date) continue;
+              if (b.scope === "resource" && b.resource_id === rid) return true;
+            }
+            return false;
+          });
+        if (allBlocked) return true;
+      }
+    }
+    return false;
+  }
+
+  function countWorkingDays(startDate, endDate, task) {
+    let count = 0;
+    const cur = parseLocal(startDate);
+    const end = parseLocal(endDate);
+    while (cur <= end) {
+      const ds = formatDateISO(cur);
+      if (!isDateBlockedForTask(ds, task)) count++;
+      cur.setDate(cur.getDate() + 1);
+    }
+    return count;
+  }
+
+  function addWorkingDays(startDate, workDays, task) {
+    const cur = parseLocal(startDate);
+    while (isDateBlockedForTask(formatDateISO(cur), task)) {
+      cur.setDate(cur.getDate() + 1);
+    }
+    let remaining = workDays - 1;
+    while (remaining > 0) {
+      cur.setDate(cur.getDate() + 1);
+      if (!isDateBlockedForTask(formatDateISO(cur), task)) remaining--;
+    }
+    return formatDateISO(cur);
+  }
+
+  function adjustTaskForBlockedDays(task) {
+    const workDays = countWorkingDays(task.start_date, task.end_date, task);
+    if (workDays <= 0) return false;
+    let start = parseLocal(task.start_date);
+    while (isDateBlockedForTask(formatDateISO(start), task)) {
+      start.setDate(start.getDate() + 1);
+    }
+    const newStart = formatDateISO(start);
+    const newEnd = addWorkingDays(newStart, workDays, task);
+    if (newStart !== task.start_date || newEnd !== task.end_date) {
+      task.start_date = newStart;
+      task.end_date = newEnd;
+      return true;
+    }
+    return false;
+  }
+
+  function formatDateISO(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  async function adjustAllTasksForBlockedDays(prevBlockedDays) {
+    // prevBlockedDays = blocked days state BEFORE the change
+    // blockedDays (current) = state AFTER the change
+    // We count working days under the previous state, then recompute dates under the new state
+    const prev = prevBlockedDays || [];
+    let changed = false;
+    const adjusted = [];
+    for (const t of tasks) {
+      // Count working days under previous blocked days
+      const saved = blockedDays;
+      blockedDays = prev;
+      const workDays = countWorkingDays(t.start_date, t.end_date, t);
+      blockedDays = saved;
+      if (workDays <= 0) continue;
+      // Recompute start (skip current blocked days)
+      let newStart = parseLocal(t.start_date);
+      while (isDateBlockedForTask(formatDateISO(newStart), t)) {
+        newStart.setDate(newStart.getDate() + 1);
+      }
+      const newStartStr = formatDateISO(newStart);
+      const newEndStr = addWorkingDays(newStartStr, workDays, t);
+      if (newStartStr !== t.start_date || newEndStr !== t.end_date) {
+        const oldEnd = t.end_date;
+        t.start_date = newStartStr;
+        t.end_date = newEndStr;
+        await api(`/api/tasks/${t.id}`, "PUT", { start_date: t.start_date, end_date: t.end_date });
+        const delta = Math.round((parseLocal(t.end_date) - parseLocal(oldEnd)) / 86400000);
+        adjusted.push({ task: t, delta });
+        changed = true;
+      }
+    }
+    if (changed) {
+      await loadAll();
+      for (const { task, delta } of adjusted) {
+        const fresh = tasks.find((x) => x.id === task.id) || task;
+        await enforceDepsFrom(fresh, delta);
+      }
+      await loadAll();
+      // Final pass: ensure no task starts on a blocked day
+      let fixedAny = false;
+      for (const t of tasks) {
+        if (!isDateBlockedForTask(t.start_date, t)) continue;
+        const calDays = Math.round((parseLocal(t.end_date) - parseLocal(t.start_date)) / 86400000) + 1;
+        let ns = parseLocal(t.start_date);
+        while (isDateBlockedForTask(formatDateISO(ns), t)) {
+          ns.setDate(ns.getDate() + 1);
+        }
+        const nsStr = formatDateISO(ns);
+        const neStr = addWorkingDays(nsStr, calDays, t);
+        if (nsStr !== t.start_date || neStr !== t.end_date) {
+          t.start_date = nsStr;
+          t.end_date = neStr;
+          await api(`/api/tasks/${t.id}`, "PUT", { start_date: t.start_date, end_date: t.end_date });
+          fixedAny = true;
+        }
+      }
+      if (fixedAny) await loadAll();
+    }
+  }
+
+  function getBlockedDaysForColumn(dateStr) {
+    const applicable = [];
+    for (const bd of blockedDays) {
+      if (dateStr < bd.start_date || dateStr > bd.end_date) continue;
+      if (bd.scope === "global") { applicable.push(bd); continue; }
+      if (bd.scope === "project" && (!currentProjectId || bd.project_id === currentProjectId)) {
+        applicable.push(bd); continue;
+      }
+      if (bd.scope === "resource") applicable.push(bd);
+    }
+    return applicable;
+  }
+
+  function drawBlockedOverlay(ctx, totalW, totalH) {
+    const z = ZOOM_LEVELS[zoomIdx];
+    const pxPerDay = z.colW / z.days;
+    const originMs = timeOrigin.getTime();
+    const totalDays = Math.ceil(totalW / pxPerDay);
+
+    for (const bd of blockedDays) {
+      if (bd.scope === "resource") continue;
+      if (bd.scope === "project" && currentProjectId && bd.project_id !== currentProjectId) continue;
+      const bStart = parseLocal(bd.start_date);
+      const bEnd = parseLocal(bd.end_date);
+      const x1 = dateToPx(bd.start_date);
+      const x2 = dateToPx(bd.end_date) + pxPerDay;
+      if (x2 < 0 || x1 > totalW) continue;
+      const clampX = Math.max(0, x1);
+      const clampW = Math.min(totalW, x2) - clampX;
+
+      ctx.fillStyle = bd.color + "18";
+      ctx.fillRect(clampX, 0, clampW, totalH);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(clampX, 0, clampW, totalH);
+      ctx.clip();
+      ctx.strokeStyle = bd.color + "30";
+      ctx.lineWidth = 1;
+      const step = 12;
+      for (let i = -totalH; i < clampW + totalH; i += step) {
+        ctx.beginPath();
+        ctx.moveTo(clampX + i, totalH);
+        ctx.lineTo(clampX + i + totalH, 0);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  function drawBlockedOverlayResource(ctx, totalW) {
+    const z = ZOOM_LEVELS[zoomIdx];
+    const pxPerDay = z.colW / z.days;
+    const resBDs = blockedDays.filter((bd) => bd.scope === "resource");
+    if (resBDs.length === 0) return;
+
+    for (let ri = 0; ri < resViewRows.length; ri++) {
+      const rv = resViewRows[ri];
+      const rowY = resRowOffsets[ri];
+      const rowH = rv._rowH || ROW_H;
+      for (const bd of resBDs) {
+        if (bd.resource_id !== rv.resource.id) continue;
+        const x1 = dateToPx(bd.start_date);
+        const x2 = dateToPx(bd.end_date) + pxPerDay;
+        if (x2 < 0 || x1 > totalW) continue;
+        const clampX = Math.max(0, x1);
+        const clampW = Math.min(totalW, x2) - clampX;
+
+        ctx.fillStyle = bd.color + "18";
+        ctx.fillRect(clampX, rowY, clampW, rowH);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(clampX, rowY, clampW, rowH);
+        ctx.clip();
+        ctx.strokeStyle = bd.color + "30";
+        ctx.lineWidth = 1;
+        const step = 12;
+        for (let i = -rowH; i < clampW + rowH; i += step) {
+          ctx.beginPath();
+          ctx.moveTo(clampX + i, rowY + rowH);
+          ctx.lineTo(clampX + i + rowH, rowY);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
     }
   }
 
@@ -892,6 +1120,7 @@
     ctx.clearRect(0, 0, totalW, totalH);
 
     drawGrid(ctx, totalW, totalH, z);
+    drawBlockedOverlay(ctx, totalW, totalH);
     drawToday(ctx, totalW, totalH, z);
 
     for (let i = 0; i < tasks.length; i++) {
@@ -1013,6 +1242,8 @@
     ctx.clearRect(0, 0, totalW, totalH);
 
     drawGridVariable(ctx, totalW, totalH, z);
+    drawBlockedOverlay(ctx, totalW, totalH);
+    drawBlockedOverlayResource(ctx, totalW);
     drawToday(ctx, totalW, totalH, z);
 
     for (let ri = 0; ri < resViewRows.length; ri++) {
@@ -1437,24 +1668,44 @@
         }
       }
       setHoveredRow(rowIdx);
-      // Utilization tooltip in resource view
+      // Tooltip: blocked days + utilization
       const tooltip = $("#util-tooltip");
+      const z = ZOOM_LEVELS[zoomIdx];
+      const dayOffset = Math.floor((mx / z.colW) * z.days);
+      const hoverDate = new Date(timeOrigin.getTime());
+      hoverDate.setDate(hoverDate.getDate() + dayOffset);
+      const hoverDateStr = formatDateISO(hoverDate);
+      const hoveredBDs = getBlockedDaysForColumn(hoverDateStr);
+      // For resource view, also check resource-specific blocked days
+      let tooltipParts = [];
+      if (hoveredBDs.length > 0) {
+        const bdNames = [...new Set(hoveredBDs.map((bd) => bd.name))];
+        tooltipParts.push(bdNames.join(", "));
+      }
       if (viewMode === "resources" && rowIdx >= 0) {
         const rv = resViewRows[rowIdx];
-        if (rv && Object.keys(rv.dayUtil).length > 0) {
-          const dayKey = pxToTime(mx);
-          const util = rv.dayUtil[dayKey];
-          if (util !== undefined) {
-            tooltip.textContent = util + "% utilized";
-            tooltip.style.display = "block";
-            tooltip.style.left = (mx + 12) + "px";
-            tooltip.style.top = (my - 24) + "px";
-          } else {
-            tooltip.style.display = "none";
+        if (rv) {
+          // Check resource-specific blocked days
+          const resBDs = blockedDays.filter((bd) =>
+            bd.scope === "resource" && bd.resource_id === rv.resource.id &&
+            hoverDateStr >= bd.start_date && hoverDateStr <= bd.end_date
+          );
+          if (resBDs.length > 0) {
+            const names = resBDs.map((bd) => bd.name).filter((n) => !tooltipParts.includes(n));
+            if (names.length > 0) tooltipParts.push(names.join(", "));
           }
-        } else {
-          tooltip.style.display = "none";
+          if (Object.keys(rv.dayUtil).length > 0) {
+            const dayKey = pxToTime(mx);
+            const util = rv.dayUtil[dayKey];
+            if (util !== undefined) tooltipParts.push(util + "% utilized");
+          }
         }
+      }
+      if (tooltipParts.length > 0) {
+        tooltip.textContent = tooltipParts.join(" · ");
+        tooltip.style.display = "block";
+        tooltip.style.left = (mx + 12) + "px";
+        tooltip.style.top = (my - 24) + "px";
       } else {
         tooltip.style.display = "none";
       }
@@ -1548,6 +1799,27 @@
       const t = dragTask; dragTask = null;
       $("#gantt-canvas").style.cursor = "default";
       if (t.start_date !== dragOrigStart || t.end_date !== dragOrigEnd) {
+        // Adjust for blocked days based on drag mode
+        if (dragMode === "move") {
+          // Preserve original working day count when moving
+          const origWorkDays = countWorkingDays(dragOrigStart, dragOrigEnd, t);
+          if (origWorkDays > 0) {
+            let ns = parseLocal(t.start_date);
+            while (isDateBlockedForTask(formatDateISO(ns), t)) {
+              ns.setDate(ns.getDate() + 1);
+            }
+            t.start_date = formatDateISO(ns);
+            t.end_date = addWorkingDays(t.start_date, origWorkDays, t);
+          }
+        } else if (dragMode === "resize-start") {
+          // Push start past blocked days, keep end fixed
+          let ns = parseLocal(t.start_date);
+          while (isDateBlockedForTask(formatDateISO(ns), t)) {
+            ns.setDate(ns.getDate() + 1);
+          }
+          t.start_date = formatDateISO(ns);
+        }
+        // resize-end: user explicitly chose the new end date, don't adjust
         const snapshotBefore = tasks.map((x) => ({ id: x.id, start_date: x.start_date, end_date: x.end_date }));
         await api(`/api/tasks/${t.id}`, "PUT", { start_date: t.start_date, end_date: t.end_date });
         const origEnd = parseLocal(dragOrigEnd).getTime();
@@ -2020,6 +2292,83 @@
   function closeProjectModal() {
     $("#project-modal").classList.remove("open", "z-above");
     if (projModalFromList) { projModalFromList = false; renderProjectList(); }
+  }
+
+  // ── Blocked Days modal ─────────────────────────────────
+
+  function openBlockedDaysModal() {
+    renderBlockedDaysList();
+    $("#blocked-days-modal").classList.add("open");
+  }
+
+  function renderBlockedDaysList() {
+    const container = $("#blocked-days-list");
+    if (blockedDays.length === 0) {
+      container.innerHTML = '<p style="color:var(--text-dim);font-size:13px;padding:12px 0">No blocked days yet.</p>';
+      return;
+    }
+    container.innerHTML = blockedDays.map((bd) => {
+      const scopeLabel = bd.scope === "global" ? "Global" :
+        bd.scope === "resource" ? (resources.find((r) => r.id === bd.resource_id)?.name || "Resource") :
+        (projects.find((p) => p.id === bd.project_id)?.name || "Project");
+      return `<div class="resource-list-item" data-id="${bd.id}">
+        <span class="resource-list-dot" style="background:${bd.color}"></span>
+        <span class="resource-list-name">${esc(bd.name)}</span>
+        <span class="resource-list-role">${bd.start_date} — ${bd.end_date}</span>
+        <span style="font-size:11px;color:var(--text-dim)">${scopeLabel}</span>
+        <div class="resource-list-actions">
+          <button class="btn btn-ghost btn-icon bd-edit" title="Edit">&#9998;</button>
+          <button class="btn btn-ghost btn-icon bd-delete" title="Delete" style="color:var(--danger)">&times;</button>
+        </div>
+      </div>`;
+    }).join("");
+    container.querySelectorAll(".bd-edit").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = parseInt(btn.closest("[data-id]").dataset.id);
+        openBlockedDayEditModal(blockedDays.find((bd) => bd.id === id));
+      });
+    });
+    container.querySelectorAll(".bd-delete").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const id = parseInt(btn.closest("[data-id]").dataset.id);
+        const oldBDs = [...blockedDays];
+        await api(`/api/blocked-days/${id}`, "DELETE");
+        await loadAll();
+        renderBlockedDaysList();
+        await adjustAllTasksForBlockedDays(oldBDs);
+      });
+    });
+  }
+
+  function openBlockedDayEditModal(bd) {
+    const isEdit = !!bd;
+    $("#blocked-day-modal-title").textContent = isEdit ? "Edit Blocked Day" : "Add Blocked Day";
+    $("#bd-id").value = isEdit ? bd.id : "";
+    $("#bd-name").value = isEdit ? bd.name : "";
+    $("#bd-start").value = isEdit ? bd.start_date : "";
+    $("#bd-end").value = isEdit ? bd.end_date : "";
+    $("#bd-scope").value = isEdit ? bd.scope : "global";
+    $("#bd-color").value = isEdit ? bd.color : "#ff6b6b";
+    $("#btn-bd-delete").style.display = isEdit ? "" : "none";
+
+    const resSel = $("#bd-resource");
+    resSel.innerHTML = resources.map((r) => `<option value="${r.id}">${esc(r.name)}</option>`).join("");
+    if (isEdit && bd.resource_id) resSel.value = bd.resource_id;
+
+    const projSel = $("#bd-project");
+    projSel.innerHTML = projects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+    if (isEdit && bd.project_id) projSel.value = bd.project_id;
+
+    updateBdScopeVisibility();
+    $("#blocked-day-modal").classList.add("open");
+  }
+
+  function updateBdScopeVisibility() {
+    const scope = $("#bd-scope").value;
+    $("#bd-resource-label").style.display = scope === "resource" ? "" : "none";
+    $("#bd-project-label").style.display = scope === "project" ? "" : "none";
   }
 
   function openProjectListModal() {
@@ -2611,6 +2960,46 @@
     $("#btn-undo").addEventListener("click", () => undo());
     $("#btn-redo").addEventListener("click", () => redo());
     $("#btn-manage-resources").addEventListener("click", () => openResourceListModal());
+    $("#btn-blocked-days").addEventListener("click", () => openBlockedDaysModal());
+    $("#btn-blocked-days-close").addEventListener("click", () => { $("#blocked-days-modal").classList.remove("open"); });
+    $("#btn-add-blocked-day").addEventListener("click", () => openBlockedDayEditModal(null));
+    $("#btn-bd-cancel").addEventListener("click", () => { $("#blocked-day-modal").classList.remove("open"); });
+    $("#bd-scope").addEventListener("change", updateBdScopeVisibility);
+    $("#btn-bd-delete").addEventListener("click", async () => {
+      const id = $("#bd-id").value;
+      if (id) {
+        const oldBDs = [...blockedDays];
+        await api(`/api/blocked-days/${id}`, "DELETE");
+        $("#blocked-day-modal").classList.remove("open");
+        await loadAll();
+        renderBlockedDaysList();
+        await adjustAllTasksForBlockedDays(oldBDs);
+      }
+    });
+    $("#blocked-day-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = $("#bd-id").value;
+      const scope = $("#bd-scope").value;
+      const data = {
+        name: $("#bd-name").value,
+        start_date: $("#bd-start").value,
+        end_date: $("#bd-end").value,
+        scope,
+        resource_id: scope === "resource" ? parseInt($("#bd-resource").value) : null,
+        project_id: scope === "project" ? parseInt($("#bd-project").value) : null,
+        color: $("#bd-color").value,
+      };
+      const prevBDs = [...blockedDays];
+      if (id) {
+        await api(`/api/blocked-days/${id}`, "PUT", data);
+      } else {
+        await api("/api/blocked-days", "POST", data);
+      }
+      $("#blocked-day-modal").classList.remove("open");
+      await loadAll();
+      renderBlockedDaysList();
+      await adjustAllTasksForBlockedDays(prevBDs);
+    });
     $("#btn-add-project").addEventListener("click", () => openProjectModal(null));
     $("#btn-edit-project").addEventListener("click", () => {
       const p = projects.find((p) => p.id === currentProjectId);
@@ -2723,8 +3112,26 @@
         parent_id: $("#task-parent").value ? parseInt($("#task-parent").value) : null,
         project_id: $("#task-project").value ? parseInt($("#task-project").value) : null,
       };
+      // Adjust dates for blocked days only if user changed the dates
+      const oldTask = id ? tasks.find((x) => x.id === parseInt(id)) : null;
+      const datesChanged = !oldTask || oldTask.start_date !== startVal || oldTask.end_date !== endVal;
+      if (datesChanged) {
+        const tempTask = { ...data, resource_ids: resourceIds.map((r) => r.id || r) };
+        const calDays = Math.round((parseLocal(data.end_date) - parseLocal(data.start_date)) / 86400000) + 1;
+        if (calDays > 0) {
+          let ns = parseLocal(tempTask.start_date);
+          while (isDateBlockedForTask(formatDateISO(ns), tempTask)) {
+            ns.setDate(ns.getDate() + 1);
+          }
+          const adjStart = formatDateISO(ns);
+          const adjEnd = addWorkingDays(adjStart, calDays, tempTask);
+          if (adjStart !== data.start_date || adjEnd !== data.end_date) {
+            data.start_date = adjStart;
+            data.end_date = adjEnd;
+          }
+        }
+      }
       if (id) {
-        const oldTask = tasks.find((x) => x.id === parseInt(id));
         const before = oldTask ? {
           name: oldTask.name, description: oldTask.description,
           start_date: oldTask.start_date, end_date: oldTask.end_date,
@@ -3000,6 +3407,7 @@
       });
     });
     document.addEventListener("keydown", (e) => {
+      if (!e.key) return;
       const key = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) {
         e.preventDefault();

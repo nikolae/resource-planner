@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify
-from models import db, Resource, Task, Dependency, Project, TaskResource
+from models import db, Resource, Task, Dependency, Project, TaskResource, BlockedDay
 from datetime import date, timedelta
 import json
 import os
@@ -69,6 +69,70 @@ with app.app_context():
     except Exception:
         db.session.rollback()
     db.create_all()
+
+
+# ── Blocked Days ─────────────────────────────────────
+
+@app.route("/api/blocked-days", methods=["GET"])
+def get_blocked_days():
+    query = BlockedDay.query
+    scope = request.args.get("scope")
+    resource_id = request.args.get("resource_id", type=int)
+    project_id = request.args.get("project_id", type=int)
+    if scope:
+        query = query.filter_by(scope=scope)
+    if resource_id:
+        query = query.filter((BlockedDay.resource_id == resource_id) | (BlockedDay.scope == "global"))
+    if project_id:
+        query = query.filter((BlockedDay.project_id == project_id) | (BlockedDay.scope == "global"))
+    return jsonify([bd.to_dict() for bd in query.all()])
+
+
+@app.route("/api/blocked-days", methods=["POST"])
+def create_blocked_day():
+    data = request.json
+    bd = BlockedDay(
+        name=data["name"],
+        start_date=date.fromisoformat(data["start_date"]),
+        end_date=date.fromisoformat(data["end_date"]),
+        scope=data.get("scope", "global"),
+        resource_id=data.get("resource_id"),
+        project_id=data.get("project_id"),
+        color=data.get("color", "#ff6b6b"),
+    )
+    db.session.add(bd)
+    db.session.commit()
+    return jsonify(bd.to_dict()), 201
+
+
+@app.route("/api/blocked-days/<int:bd_id>", methods=["PUT"])
+def update_blocked_day(bd_id):
+    bd = BlockedDay.query.get_or_404(bd_id)
+    data = request.json
+    if "name" in data:
+        bd.name = data["name"]
+    if "start_date" in data:
+        bd.start_date = date.fromisoformat(data["start_date"])
+    if "end_date" in data:
+        bd.end_date = date.fromisoformat(data["end_date"])
+    if "scope" in data:
+        bd.scope = data["scope"]
+    if "resource_id" in data:
+        bd.resource_id = data["resource_id"]
+    if "project_id" in data:
+        bd.project_id = data["project_id"]
+    if "color" in data:
+        bd.color = data["color"]
+    db.session.commit()
+    return jsonify(bd.to_dict())
+
+
+@app.route("/api/blocked-days/<int:bd_id>", methods=["DELETE"])
+def delete_blocked_day(bd_id):
+    bd = BlockedDay.query.get_or_404(bd_id)
+    db.session.delete(bd)
+    db.session.commit()
+    return "", 204
 
 
 @app.route("/")
@@ -145,6 +209,7 @@ def delete_project(pid):
         ).delete(synchronize_session=False)
         TaskResource.query.filter(TaskResource.task_id.in_(task_ids)).delete(synchronize_session=False)
         Task.query.filter_by(project_id=pid).delete()
+    BlockedDay.query.filter_by(project_id=pid).delete()
     db.session.delete(p)
     db.session.commit()
     return "", 204
@@ -187,6 +252,7 @@ def update_resource(rid):
 @app.route("/api/resources/<int:rid>", methods=["DELETE"])
 def delete_resource(rid):
     TaskResource.query.filter_by(resource_id=rid).delete()
+    BlockedDay.query.filter_by(resource_id=rid).delete()
     r = Resource.query.get_or_404(rid)
     db.session.delete(r)
     db.session.commit()
@@ -355,6 +421,15 @@ def export_project(pid):
         Dependency.successor_id.in_(task_ids),
     ).all() if task_ids else []
 
+    # Blocked days: global, project-scoped, and resource-scoped
+    blocked_days_list = BlockedDay.query.filter(
+        db.or_(
+            BlockedDay.scope == "global",
+            db.and_(BlockedDay.scope == "project", BlockedDay.project_id == pid),
+            BlockedDay.scope == "resource",
+        )
+    ).all()
+
     # Build export payload with stable local indices
     task_id_to_idx = {t.id: i for i, t in enumerate(proj_tasks)}
     res_id_to_idx = {r.id: i for i, r in enumerate(resources_list)}
@@ -393,6 +468,17 @@ def export_project(pid):
                 "lag": d.lag,
             }
             for d in deps_list
+        ],
+        "blocked_days": [
+            {
+                "name": bd.name,
+                "start_date": bd.start_date.isoformat(),
+                "end_date": bd.end_date.isoformat(),
+                "scope": bd.scope,
+                "resource_idx": res_id_to_idx.get(bd.resource_id) if bd.resource_id else None,
+                "color": bd.color,
+            }
+            for bd in blocked_days_list
         ],
     }
     return jsonify(export_data)
@@ -468,6 +554,23 @@ def import_project():
                 dep_type=d.get("dep_type", "FS"), lag=d.get("lag", 0),
             ))
 
+    # Create blocked days
+    for bd in data.get("blocked_days", []):
+        scope = bd.get("scope", "global")
+        resource_id = None
+        if scope == "resource" and bd.get("resource_idx") is not None:
+            resource_id = res_idx_to_id.get(bd["resource_idx"])
+        project_id = p.id if scope == "project" else None
+        db.session.add(BlockedDay(
+            name=bd["name"],
+            start_date=date.fromisoformat(bd["start_date"]),
+            end_date=date.fromisoformat(bd["end_date"]),
+            scope=scope,
+            resource_id=resource_id,
+            project_id=project_id,
+            color=bd.get("color", "#ff6b6b"),
+        ))
+
     db.session.commit()
     return jsonify(p.to_dict()), 201
 
@@ -539,6 +642,7 @@ def seed_data():
 
 @app.route("/api/reset", methods=["POST"])
 def reset_data():
+    BlockedDay.query.delete()
     Dependency.query.delete()
     TaskResource.query.delete()
     Task.query.delete()

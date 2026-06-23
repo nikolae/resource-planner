@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-ARG VERSION=0.4
+ARG VERSION=0.6.1
 ARG BUILD_DATE
 
 LABEL version="${VERSION}" \

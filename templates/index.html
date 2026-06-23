@@ -30,6 +30,7 @@
       <button id="btn-redo" class="btn btn-ghost btn-icon" title="Redo (Ctrl+Y)">&#8631;</button>
       <button id="btn-add-task" class="btn btn-primary">+ Task</button>
       <button id="btn-manage-resources" class="btn btn-secondary">Resources</button>
+      <button id="btn-blocked-days" class="btn btn-secondary">Blocked Days</button>
       <button id="btn-export" class="btn btn-secondary">Export</button>
       <button id="btn-themes" class="btn btn-ghost btn-icon" title="Themes">&#127912;</button>
       <button id="btn-help" class="btn btn-ghost btn-icon" title="Getting Started">?</button>
@@ -388,6 +389,54 @@
         <button type="button" class="btn btn-ghost btn-icon" id="btn-docs-close">&times;</button>
       </div>
       <div id="docs-content" class="docs-content"></div>
+    </div>
+  </div>
+
+  <!-- Blocked Days list modal -->
+  <div class="modal-overlay" id="blocked-days-modal">
+    <div class="modal modal-wide">
+      <div class="modal-header-row">
+        <h2>Blocked Days</h2>
+        <button type="button" class="btn btn-primary" id="btn-add-blocked-day">+ Add</button>
+      </div>
+      <div id="blocked-days-list"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" id="btn-blocked-days-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Blocked Day edit modal -->
+  <div class="modal-overlay z-above" id="blocked-day-modal">
+    <div class="modal">
+      <h2 id="blocked-day-modal-title">Add Blocked Day</h2>
+      <form id="blocked-day-form">
+        <input type="hidden" id="bd-id">
+        <label>Name <input type="text" id="bd-name" required placeholder="e.g. Christmas Break, PTO"></label>
+        <div class="form-row">
+          <label>Start Date <input type="date" id="bd-start" required></label>
+          <label>End Date <input type="date" id="bd-end" required></label>
+        </div>
+        <label>Scope
+          <select id="bd-scope">
+            <option value="global">Global (company-wide)</option>
+            <option value="resource">Per Resource (PTO)</option>
+            <option value="project">Per Project</option>
+          </select>
+        </label>
+        <label id="bd-resource-label" style="display:none">Resource
+          <select id="bd-resource"></select>
+        </label>
+        <label id="bd-project-label" style="display:none">Project
+          <select id="bd-project"></select>
+        </label>
+        <label>Color <input type="color" id="bd-color" value="#ff6b6b"></label>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" id="btn-bd-cancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="btn-bd-delete" style="display:none">Delete</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
     </div>
   </div>
 

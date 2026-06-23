@@ -3,13 +3,13 @@ services:
     build:
       context: .
       args:
-        VERSION: "0.4"
-    image: resource-planner:0.4
+        VERSION: "0.6.1"
+    image: resource-planner:0.6.1
     ports:
       - "5000:5000"
     environment:
       - APP_NAME=Nick's Super Great Resource Planner
-      - APP_VERSION=0.4
+      - APP_VERSION=0.6.1
     volumes:
       - planner-data:/app/instance
       - ./config.json:/app/config.json

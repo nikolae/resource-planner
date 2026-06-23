@@ -107,6 +107,33 @@ class Task(db.Model):
         }
 
 
+class BlockedDay(db.Model):
+    __tablename__ = "blocked_day"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    scope = db.Column(db.String(10), nullable=False, default="global")
+    resource_id = db.Column(db.Integer, db.ForeignKey("resource.id"), nullable=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("project.id"), nullable=True)
+    color = db.Column(db.String(7), default="#ff6b6b")
+
+    resource = db.relationship("Resource", lazy=True)
+    project = db.relationship("Project", lazy=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "start_date": self.start_date.isoformat(),
+            "end_date": self.end_date.isoformat(),
+            "scope": self.scope,
+            "resource_id": self.resource_id,
+            "project_id": self.project_id,
+            "color": self.color,
+        }
+
+
 class Dependency(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     predecessor_id = db.Column(db.Integer, db.ForeignKey("task.id"), nullable=False)
